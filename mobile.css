@@ -3,3 +3,6 @@ html{min-width:0;scroll-padding-top:16px}body{min-width:0;overflow-wrap:break-wo
 @media(orientation:landscape) and (max-height:550px){main{padding-top:max(8px,env(safe-area-inset-top));padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}.hero{margin-bottom:10px}.hero h1{font-size:24px}.flow-steps li{min-height:44px;padding:7px;flex-direction:row}.editor-viewport{height:55vh;height:55dvh;min-height:160px}.preview-toolbar{position:static}.workspace,.workspace:has(#panel-3:not([hidden])){grid-template-columns:1fr}.sidebar{grid-template-columns:1fr 1fr}.sidebar .value-strip{grid-column:1/-1}.masthead{margin-bottom:10px}}
 
 .privacy-actions .button{min-height:44px}
+
+/* Local color editor; preserve the existing page and toolbar appearance. */
+.image-editor #privacy-layer:not(.drawing) .privacy-rect{pointer-events:auto;cursor:pointer}#mask-color-dialog input[type=color]{width:88px;min-height:44px;padding:4px;background:white;border:1px solid var(--line);border-radius:9px}.mask-palette{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:16px 0}.mask-palette button{min-width:0;min-height:44px;background:var(--swatch);border:2px solid #c4d2e4;border-radius:9px;cursor:pointer}.mask-palette button:focus-visible{outline:3px solid #2255c7;outline-offset:2px}
