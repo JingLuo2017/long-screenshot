@@ -1,6 +1,6 @@
 (function(root){
 'use strict';
-const VERSION='1.8.3';
+const VERSION='1.8.4';
 function compareVersions(a,b){const x=String(a).split('.').map(Number),y=String(b).split('.').map(Number);for(let i=0;i<Math.max(x.length,y.length);i++){const d=(x[i]||0)-(y[i]||0);if(d)return Math.sign(d)}return 0}
 function cacheName(scope,version=VERSION){return 'scrollshot-'+encodeURIComponent(new URL(scope).pathname)+'-v'+version}
 function mount(options={}){
@@ -28,3 +28,4 @@ setInterval(()=>{if(document.visibilityState==='visible')check()},300000);check(
 }
 root.ScrollshotUpdates={VERSION,compareVersions,cacheName,mount};
 })(typeof globalThis==='object'?globalThis:this);
+

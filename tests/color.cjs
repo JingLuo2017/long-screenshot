@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const {createCanvas}=require(require.resolve('@napi-rs/canvas',{paths:[process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES||process.cwd()]}));
+require('../extras.js');
+const source=createCanvas(4,2),sourceCtx=source.getContext('2d'),pixel=createCanvas(1,1).getContext('2d');
+const colors=['#ff0000','#00ff00','#0000ff','#e7edf4','#123456','#fefefe','#000000','#d93025'];
+colors.forEach((c,i)=>{sourceCtx.fillStyle=c;sourceCtx.fillRect(i%4,Math.floor(i/4),1,1)});
+for(let i=0;i<colors.length;i++)assert.equal(ScrollshotExtras.samplePhotoPixel(pixel,source,(i%4+.5)/4,(Math.floor(i/4)+.5)/2),colors[i]);
+assert.equal(ScrollshotExtras.samplePhotoPixel(pixel,source,-1,-1),colors[0]);assert.equal(ScrollshotExtras.samplePhotoPixel(pixel,source,1,1),colors[7]);
+const edited=createCanvas(4,2),ctx=edited.getContext('2d');ctx.drawImage(source,0,0);ScrollshotExtras.drawPrivacy(ctx,4,2,[{x:0,y:0,w:1,h:1,color:'#000000'}]);ctx.fillStyle='rgba(128,128,128,.6)';ctx.fillRect(0,0,4,2);
+assert.notEqual(ScrollshotExtras.samplePhotoPixel(pixel,edited,.125,.25),colors[0]);assert.equal(ScrollshotExtras.samplePhotoPixel(pixel,source,.125,.25),colors[0],'source sampling must ignore flattened masks and dimmed surfaces');
+let seen={};const fake={save(){},restore(){},measureText(){return{width:20}},fillText(){seen={font:this.font,alpha:this.globalAlpha}},set textBaseline(v){},set fillStyle(v){},set textAlign(v){}};
+ScrollshotExtras.drawWatermark(fake,750,1000,{enabled:true,text:'日期'});assert(seen.font.includes('34px'));assert.equal(seen.alpha,.5);
+const mask=createCanvas(2,2).getContext('2d');ScrollshotExtras.drawPrivacy(mask,2,2,[{x:0,y:0,w:1,h:1,color:'#123456'}]);assert.deepEqual([...mask.getImageData(0,0,1,1).data],[18,52,86,255]);
+console.log('PASS original-pixel RGB, edge clamping, mask/dimming isolation, default font/opacity and fully opaque privacy masks');
