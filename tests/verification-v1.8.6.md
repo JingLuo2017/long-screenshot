@@ -1,0 +1,10 @@
+# v1.8.6 verification — 2026-11-08
+
+- Watermark and privacy color controls both use native `input[type=color]`, the same `system-color` class and grid layout. No custom mask-color dialog, RGB/HEX controls, source sampling overlay, or sampling handlers remain in production code.
+- Input and change-only events update the selected mask. Two-mask tests verified exact exported RGB values and that recoloring one does not change the other. New-mask default color, selecting an existing mask's color, red/blue watermark export, independent watermark opacity, original dimensions, navigation, reset and pinch zoom passed browser regression checks.
+- Both native color wells were clicked and assigned values through browser accessibility controls; their displayed values and editing status updated. Native picker UI details remain provided by the host browser/OS.
+- Both swatches have matching width, height, padding and border radius. Layout checks passed at 320×568, 375×667, 375×812, 390×844, 393×852, 414×896, 430×932, 440×956 and 844×390. Stable scroll gutters prevent panel-content differences from changing swatch widths.
+- Canvas tests pass for eight exact opaque mask colors, independent watermark color, 17px reference sizing, 50% watermark opacity and watermark-over-mask ordering. Release/cache checks and 3.5-second update-status checks pass.
+- The inline video generation/stitching and sharing handlers are unchanged. Previous changelog contents, verification records and appreciation image are preserved. Publication appends a new child commit without rewriting history.
+
+Tests used Chromium, synthetic images and constrained viewport sizes. Actual iOS Safari native color-sheet internals, system eyedropper behavior and Photos sharing were not tested. Custom raw-source pixel sampling is intentionally removed in favor of the requested native picker. Browser event tests verify application color handling and PNG output; they do not emulate a specific iOS system color-sheet implementation.
