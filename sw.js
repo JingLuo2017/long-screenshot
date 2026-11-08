@@ -1,39 +1,10 @@
-// Presentation revision ui-01. Algorithm and access configuration unchanged.
-const CACHE_NAME = 'scrollshot-offline-v1-8';
-const PAGE_URL = new URL('./', self.registration.scope).href;
-self.addEventListener('install', event => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const response = await fetch(PAGE_URL, {cache: 'reload'});
-    if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) throw new Error('Could not cache the application page');
-    await cache.put(PAGE_URL, response);
-    await cache.addAll(['./core.js?v=1.4.1','./extras.js?v=1.8','./flow.js?v=1.8','./manifest.webmanifest','./icon-192.png','./icon-512.png'].map(p=>new URL(p,self.registration.scope).href));
-    await self.skipWaiting();
-  })());
-});
-self.addEventListener('activate', event => {
-  event.waitUntil((async () => {
-    const names = await caches.keys();
-    await Promise.all(names.filter(x => x.startsWith('scrollshot-offline-') && x !== CACHE_NAME).map(x => caches.delete(x)));
-    await self.clients.claim();
-  })());
-});
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
-  if(url.origin === self.location.origin && (url.pathname.endsWith('/core.js')||url.pathname.endsWith('/extras.js')||url.pathname.endsWith('/flow.js'))) {event.respondWith(caches.open(CACHE_NAME).then(c=>c.match(event.request)).then(r=>r||fetch(event.request)));return;}
-  if (event.request.mode !== 'navigate' || url.origin !== self.location.origin || url.pathname !== new URL(PAGE_URL).pathname) return;
-  event.respondWith((async () => {
-    try {
-      const network = await fetch(event.request);
-      if (network.ok && network.headers.get('content-type')?.includes('text/html')) {
-        const cache = await caches.open(CACHE_NAME);
-        await cache.put(PAGE_URL, network.clone());
-      }
-      return network;
-    } catch (error) {
-      const cached = await caches.match(PAGE_URL);
-      if (cached) return cached;
-      throw error;
-    }
-  })());
-});
+/* A release is cached atomically; activation of a newer release requires user consent. */
+const VERSION='1.8.1';
+const PAGE_URL=new URL('./',self.registration.scope).href;
+const PREFIX='scrollshot-'+encodeURIComponent(new URL(PAGE_URL).pathname)+'-v';
+const CACHE_NAME=PREFIX+VERSION;
+const ASSETS=['./core.js?v=1.4.1','./extras.js?v=1.8.1','./flow.js?v=1.8','./editor.js?v=1.8.1','./updates.js?v=1.8.1','./mobile.css?v=1.8.1','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
+self.addEventListener('install',event=>event.waitUntil((async()=>{try{const cache=await caches.open(CACHE_NAME),response=await fetch(PAGE_URL,{cache:'reload'});if(!response.ok)throw Error('Page download failed');const html=await response.clone().text();if(!html.includes('name="app-version" content="'+VERSION+'"'))throw Error('Release files are not synchronized');await cache.put(PAGE_URL,response);await cache.addAll(ASSETS.map(p=>new URL(p,PAGE_URL).href));await cache.put(new URL('__ready__',PAGE_URL),new Response(VERSION))}catch(e){await caches.delete(CACHE_NAME);throw e}})()));
+self.addEventListener('message',event=>{if(event.data?.type==='GET_VERSION')event.ports[0]?.postMessage({version:VERSION});if(event.data?.type==='ACTIVATE_VERSION'&&event.data.version===VERSION)event.waitUntil(self.skipWaiting())});
+self.addEventListener('activate',event=>event.waitUntil((async()=>{const names=await caches.keys(),owned=names.filter(n=>n.startsWith(PREFIX)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),keep=new Set([CACHE_NAME,...owned.filter(n=>n!==CACHE_NAME).slice(-1)]);await Promise.all(owned.filter(n=>!keep.has(n)).map(n=>caches.delete(n)));await self.clients.claim()})()));
+self.addEventListener('fetch',event=>{const url=new URL(event.request.url),page=new URL(PAGE_URL);if(event.request.method&&event.request.method!=='GET'||url.origin!==page.origin)return;if(event.request.mode==='navigate'&&(url.pathname===page.pathname||url.pathname===page.pathname+'index.html')){event.respondWith((async()=>{const cached=await(await caches.open(CACHE_NAME)).match(PAGE_URL);return cached||fetch(event.request)})());return}if(ASSETS.some(p=>new URL(p,PAGE_URL).href===url.href))event.respondWith((async()=>await(await caches.open(CACHE_NAME)).match(event.request)||fetch(event.request))())});
