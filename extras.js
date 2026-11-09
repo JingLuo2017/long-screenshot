@@ -13,17 +13,17 @@ function drawPrivacy(ctx,width,height,rects){ctx.save();ctx.globalAlpha=1;for(co
 function composeEdits(ctx,width,height,options,rects){drawPrivacy(ctx,width,height,rects);drawWatermark(ctx,width,height,options)}
 function bindWatermark(onExport){
 const get=id=>document.getElementById(id),fields=get('wm-fields'),enabled=get('wm-enabled'),message=get('wm-status'),share=get('share'),layer=get('privacy-layer'),privacy=get('privacy-fields'),mode=get('privacy-mode'),done=get('privacy-done'),textInput=get('wm-text'),img=get('result'),retry=get('wm-apply');
-let base=null,baseURL=null,generating=false,encoding=false,dirty=false,timer=null,revision=0,drawing=false,rects=[],selected=-1,gesture=null,synced=true,defaultText=dateText(),wmKey='',pickerMask=null,controlsFrame=0;
-const viewport=get('editor-viewport'),shell=viewport.parentElement,remove=get('privacy-delete'),picker=get('privacy-native-picker'),swatch=get('privacy-color');
+let base=null,baseURL=null,generating=false,encoding=false,dirty=false,timer=null,revision=0,drawing=false,rects=[],selected=-1,gesture=null,synced=true,defaultText=dateText(),wmKey='',controlsFrame=0,maskId=0;
+const viewport=get('editor-viewport'),shell=viewport.parentElement,remove=get('privacy-delete'),swatch=get('privacy-color'),maskNodes=new Map(),blockedTaps=new WeakSet();
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
 function visibleBounds(){const v=viewport.getBoundingClientRect(),left=v.left+viewport.clientLeft,top=v.top+viewport.clientTop;return {left,top,right:left+viewport.clientWidth,bottom:top+viewport.clientHeight}}
 function positionDelete(){
  controlsFrame=0;
  const el=layer.querySelector(`.privacy-rect[data-rect="${selected}"]`);
- if(!base||!el||gesture||generating){remove.hidden=true;return}
+ if(!base||!drawing||!el||gesture||generating){remove.hidden=true;return}
  const r=el.getBoundingClientRect(),v=visibleBounds();
  const left=Math.max(r.left,v.left),right=Math.min(r.right,v.right),top=Math.max(r.top,v.top),bottom=Math.min(r.bottom,v.bottom);
- const width=64,height=44,gap=4;
+ const width=44,height=44,gap=4;
  if(left>=right||top>=bottom||v.right-v.left<width+2*gap||v.bottom-v.top<height+2*gap){remove.hidden=true;return}
  const above=r.top-v.top,below=v.bottom-r.bottom;
  const side=above>=height+2*gap?'above':below>=height+2*gap?'below':above>=below?'above':'below';
@@ -31,7 +31,7 @@ function positionDelete(){
  const y=clamp(side==='above'?r.top-height-gap:r.bottom+gap,v.top+gap,v.bottom-height-gap);
  const origin=shell.getBoundingClientRect();
  remove.style.left=`${x-origin.left-shell.clientLeft}px`;remove.style.top=`${y-origin.top-shell.clientTop}px`;
- remove.dataset.side=side;remove.setAttribute('aria-label',`删除第 ${selected+1} 处遮盖`);remove.hidden=false;
+ remove.dataset.side=side;remove.setAttribute('aria-label',`移除第 ${selected+1} 处遮盖`);remove.hidden=false;
 }
 function scheduleDelete(){if(!controlsFrame)controlsFrame=requestAnimationFrame(positionDelete)}
 viewport.addEventListener('scroll',scheduleDelete,{passive:true});
@@ -39,9 +39,48 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(schedul
 const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.id='watermark-preview';svg.setAttribute('aria-hidden','true');layer.parentElement.appendChild(svg);
 textInput.value=defaultText;for(const name of ['focus','click'])textInput.addEventListener(name,()=>textInput.select());
 const options=()=>({enabled:enabled.checked,text:textInput.value,position:get('wm-position').value,size:get('wm-size').value,opacity:get('wm-opacity').value,color:get('wm-color').value});
-function state(){fields.disabled=generating||!enabled.checked;privacy.disabled=generating;enabled.disabled=generating;done.disabled=generating;share.disabled=!base||generating||dirty||encoding||!!timer||!!gesture;retry.disabled=generating||encoding;remove.disabled=picker.disabled=generating||!!gesture;if(remove.disabled)remove.hidden=true;scheduleDelete();}
-function setDrawing(value){drawing=value;mode.textContent=value?'结束绘制':'开始框选';mode.setAttribute('aria-pressed',String(value));done.hidden=!value;layer.classList.toggle('drawing',value);layer.style.touchAction=value?'none':'auto';paint();}
-function paint(){layer.replaceChildren();rects.forEach((r,i)=>{const el=document.createElement('div');el.className='privacy-rect'+(i===selected?' selected':'');el.dataset.rect=String(i);el.setAttribute('role','button');el.tabIndex=0;el.setAttribute('aria-label',`更改第 ${i+1} 处遮盖的颜色`);el.style.cssText=`left:${r.x*100}%;top:${r.y*100}%;width:${r.w*100}%;height:${r.h*100}%;background:${synced?'transparent':r.color}`;if(drawing&&i===selected)for(const corner of ['nw','ne','sw','se']){const handle=document.createElement('span');handle.className='resize-handle '+corner;handle.dataset.handle=corner;handle.dataset.rect=String(i);el.appendChild(handle)}layer.appendChild(el)});get('privacy-count').textContent=`已遮盖 ${rects.length} 处${selected>=0?'，已选中第 '+(selected+1)+' 处':''}。${drawing?'拖动色块移动，拖动角点调整范围。':'开启框选可继续调整。'}`;if(selected<0)remove.hidden=true;scheduleDelete();}
+function state(){fields.disabled=generating||!enabled.checked;privacy.disabled=generating;enabled.disabled=generating;done.disabled=generating;share.disabled=!base||generating||dirty||encoding||!!timer||!!gesture;retry.disabled=generating||encoding;remove.disabled=generating||!!gesture;if(remove.disabled)remove.hidden=true;scheduleDelete();}
+function setDrawing(value){drawing=value;if(!value)selected=-1;mode.textContent=value?'结束绘制':'开始框选';mode.setAttribute('aria-pressed',String(value));done.hidden=!value;layer.classList.toggle('drawing',value);layer.style.touchAction=value?'none':'auto';paint();}
+function makeMask(id){
+ const el=document.createElement('div'),picker=document.createElement('input');
+ el.className='privacy-rect';
+ // Make the actual color control the hit target. Some iOS Safari versions
+ // return from showPicker() without opening a color panel.
+ picker.type='color';picker.className='mask-color-hit';
+ picker.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')blockedTaps.delete(picker)});
+ picker.addEventListener('click',e=>{
+  const index=rects.findIndex(r=>r.id===id);
+  if(!base||!drawing||generating||gesture||index<0||blockedTaps.has(picker)){e.preventDefault();return}
+  selected=index;swatch.value=rects[index].color;paint();
+  // Leave the trusted click's default action intact.
+ });
+ for(const event of ['input','change'])picker.addEventListener(event,()=>{
+  const mask=rects.find(r=>r.id===id);
+  if(!base||generating||!mask||mask.color===picker.value)return;
+  mask.color=picker.value;if(rects[selected]===mask)swatch.value=mask.color;changed();
+ });
+ const handles=['nw','ne','sw','se'].map(corner=>{
+  const handle=document.createElement('span');
+  handle.className='resize-handle '+corner;handle.dataset.handle=corner;el.appendChild(handle);return handle;
+ });
+ el.prepend(picker);layer.appendChild(el);return {el,picker,handles};
+}
+function paint(){
+ const liveIds=new Set(rects.map(r=>r.id));
+ for(const [id,node] of maskNodes)if(!liveIds.has(id)){node.el.remove();maskNodes.delete(id)}
+ rects.forEach((r,i)=>{
+  if(!maskNodes.has(r.id))maskNodes.set(r.id,makeMask(r.id));
+  const {el,picker,handles}=maskNodes.get(r.id),active=drawing&&i===selected;
+  el.dataset.rect=String(i);el.classList.toggle('selected',active);
+  el.style.cssText=`left:${r.x*100}%;top:${r.y*100}%;width:${r.w*100}%;height:${r.h*100}%;background:${synced?'transparent':r.color}`;
+  picker.setAttribute('aria-label',`更改第 ${i+1} 处遮盖的颜色`);
+  if(picker.value!==r.color)picker.value=r.color;
+  picker.hidden=!drawing;picker.disabled=!drawing||generating;
+  for(const handle of handles)handle.hidden=!active;
+ });
+ get('privacy-count').textContent=`已遮盖 ${rects.length} 处${selected>=0?'，已选中第 '+(selected+1)+' 处':''}。${drawing?'拖动色块移动，拖动角点调整范围。':'开启框选可继续调整。'}`;
+ if(!drawing||selected<0)remove.hidden=true;scheduleDelete();
+}
 function watermarkPreview(){const o=options(),w=img.naturalWidth||750,h=img.naturalHeight||1000;const key=JSON.stringify([o,w,h,synced]);if(key===wmKey)return;wmKey=key;svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.hidden=synced||!o.enabled||!o.text.trim();if(svg.hidden)return;const originalSize=Math.max(10,Math.min(72,+o.size||34))*w/750;let font=originalSize,margin=Math.max(10,w*.035),maxWidth=w-margin*2,text=o.text.trim().slice(0,80);const ctx=document.createElement('canvas').getContext('2d');ctx.font=`500 ${font}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;let measured=ctx.measureText(text).width;if(measured>maxWidth){font*=maxWidth/measured;measured=maxWidth}function put(x,y,anchor,rotate){const t=document.createElementNS(svg.namespaceURI,'text');t.textContent=text;t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('text-anchor',anchor);t.setAttribute('dominant-baseline','central');t.setAttribute('fill',o.color);t.setAttribute('opacity',Math.max(.05,Math.min(.8,+o.opacity/100)));t.setAttribute('font-size',font);t.setAttribute('font-weight','500');t.setAttribute('font-family','-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif');if(rotate)t.setAttribute('transform',`rotate(-22.5 ${x} ${y})`);svg.appendChild(t)}
 if(o.position==='tile'){const dx=Math.max(w*.42,measured+margin*2),dy=Math.max(w*.25,originalSize*6);let row=0;for(let y=dy/2;y<h;y+=dy,row++)for(let x=dx/2-(row%2)*dx/2;x<w+dx/2;x+=dx)put(x,y,'middle',true)}else{const p=o.position;let x=p.includes('left')?margin:w-margin,y=p.includes('top')?margin+originalSize/2:h-margin-originalSize/2,anchor=p.includes('left')?'start':'end';if(p==='center'){x=w/2;y=h/2;anchor='middle'}put(x,Math.max(originalSize/2,Math.min(h-originalSize/2,y)),anchor,false)}}
 function live(){synced=false;if(baseURL&&img.src!==baseURL)img.src=baseURL;paint();watermarkPreview();}
@@ -53,34 +92,29 @@ if(rev===revision&&source===base&&!gesture){onExport(blob);dirty=false;const exp
 function editInput(e){if(e.target===get('privacy-color')&&rects[selected])rects[selected].color=e.target.value;changed()}
 for(const event of ['input','change'])get('watermark-editor').addEventListener(event,editInput);retry.addEventListener('click',()=>{retry.hidden=true;changed()});
 mode.addEventListener('click',()=>setDrawing(!drawing));done.addEventListener('click',()=>setDrawing(false));
-remove.addEventListener('click',()=>{if(generating||gesture||!rects[selected])return;if(pickerMask===rects[selected])pickerMask=null;rects.splice(selected,1);selected=-1;changed();viewport.focus({preventScroll:true})});
-get('privacy-clear').addEventListener('click',()=>{rects=[];selected=-1;pickerMask=null;changed()});
+remove.addEventListener('click',()=>{if(!drawing||generating||gesture||!rects[selected])return;rects.splice(selected,1);selected=-1;changed();viewport.focus({preventScroll:true})});
+get('privacy-clear').addEventListener('click',()=>{rects=[];selected=-1;changed()});
 function point(e){const b=layer.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),y:Math.max(0,Math.min(1,(e.clientY-b.top)/b.height))}}
-layer.addEventListener('pointerdown',e=>{if(!drawing||generating||!base||gesture||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();const p=point(e),target=e.target.closest('[data-rect]'),index=target?+target.dataset.rect:-1;selected=index;let kind=target?(target.dataset.handle?'resize':'move'):'new';if(kind==='new'){selected=rects.length;rects.push({x:p.x,y:p.y,w:0,h:0,color:get('privacy-color').value})}else get('privacy-color').value=rects[index].color;gesture={kind,start:p,startX:e.clientX,startY:e.clientY,pointerId:e.pointerId,moved:false,original:{...rects[selected]},index:selected,corner:target?.dataset.handle};layer.setPointerCapture(e.pointerId);if(kind==='move'){paint();state()}else changed(false)});
+layer.addEventListener('pointerdown',e=>{
+ if(!drawing||generating||!base||(e.pointerType==='mouse'&&e.button!==0))return;
+ const picker=e.target.matches('.mask-color-hit')?e.target:null;
+ if(gesture){if(picker)blockedTaps.add(picker);e.preventDefault();return}
+ if(picker)blockedTaps.delete(picker);else e.preventDefault();
+ const p=point(e),target=e.target.closest('[data-rect]'),index=target?+target.dataset.rect:-1,corner=e.target.dataset.handle;
+ selected=index;const kind=target?(corner?'resize':'move'):'new';
+ if(kind==='new'){selected=rects.length;rects.push({id:++maskId,x:p.x,y:p.y,w:0,h:0,color:swatch.value})}else swatch.value=rects[index].color;
+ gesture={kind,start:p,startX:e.clientX,startY:e.clientY,pointerId:e.pointerId,moved:false,original:{...rects[selected]},index:selected,corner,picker};
+ // A tap must end on the same native input, including with pointer capture.
+ (picker||layer).setPointerCapture(e.pointerId);
+ if(kind==='move'){paint();state()}else changed(false);
+});
 function update(e){if(!gesture||e.pointerId!==gesture.pointerId)return;const p=point(e),g=gesture,r={...g.original};g.moved=g.moved||Math.hypot(e.clientX-g.startX,e.clientY-g.startY)>6;if(g.kind==='move'&&!g.moved)return;if(g.kind==='move'){r.x=Math.max(0,Math.min(1-r.w,r.x+p.x-g.start.x));r.y=Math.max(0,Math.min(1-r.h,r.y+p.y-g.start.y))}else{let left=g.kind==='new'?g.start.x:r.x,right=g.kind==='new'?p.x:r.x+r.w,top=g.kind==='new'?g.start.y:r.y,bottom=g.kind==='new'?p.y:r.y+r.h;if(g.kind==='resize'){if(g.corner.includes('w'))left=p.x;else right=p.x;if(g.corner.includes('n'))top=p.y;else bottom=p.y}r.x=Math.min(left,right);r.y=Math.min(top,bottom);r.w=Math.abs(right-left);r.h=Math.abs(bottom-top)}rects[g.index]=r;changed(false)}
 layer.addEventListener('pointermove',update);
-function finish(e,cancel){if(!gesture||e.pointerId!==gesture.pointerId)return;const g=gesture,tap=!cancel&&g.kind==='move'&&!g.moved&&Math.hypot(e.clientX-g.startX,e.clientY-g.startY)<=6;if(cancel){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}else{update(e);const r=rects[g.index],b=layer.getBoundingClientRect();if(r.w*b.width<3||r.h*b.height<3){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}}gesture=null;if(selected>=rects.length)selected=rects.length-1;if(tap){state();openMaskColor(g.index,e)}else changed()}
-layer.addEventListener('pointerup',e=>finish(e,false));layer.addEventListener('pointercancel',e=>finish(e,true));
-function openMaskColor(index,point){
- if(!base||generating||gesture||!Number.isInteger(index)||!rects[index])return;
- selected=index;pickerMask=rects[index];picker.value=swatch.value=pickerMask.color;paint();
- const mask=layer.querySelector(`.privacy-rect[data-rect="${index}"]`).getBoundingClientRect(),v=visibleBounds(),origin=shell.getBoundingClientRect();
- picker.style.left=`${clamp(point?.clientX??(mask.left+mask.right)/2,v.left,v.right)-origin.left-shell.clientLeft}px`;
- picker.style.top=`${clamp(point?.clientY??(mask.top+mask.bottom)/2,v.top,v.bottom)-origin.top-shell.clientTop}px`;
- // Open during the tap/key event so the browser can use its native picker.
- try{if(typeof picker.showPicker==='function'){picker.showPicker();return}}catch{}
- picker.click();
-}
-for(const event of ['input','change'])picker.addEventListener(event,()=>{
- if(generating||!pickerMask||!rects.includes(pickerMask)||pickerMask.color===picker.value)return;
- pickerMask.color=picker.value;if(rects[selected]===pickerMask)swatch.value=picker.value;changed();
-});
-layer.addEventListener('mask-select-request',e=>openMaskColor(e.detail?.index,e.detail));
-layer.addEventListener('keydown',e=>{const rect=e.target.closest('[data-rect]');if(rect&&!rect.dataset.handle&&(e.key==='Enter'||e.key===' ')){e.preventDefault();if(!e.repeat)openMaskColor(+rect.dataset.rect)}});
-layer.addEventListener('click',e=>{const rect=e.target.closest('[data-rect]');if(e.detail===0&&rect&&!rect.dataset.handle)openMaskColor(+rect.dataset.rect)});
+function finish(e,cancel){if(!gesture||e.pointerId!==gesture.pointerId)return;const g=gesture;if(cancel){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}else{update(e);const r=rects[g.index],b=layer.getBoundingClientRect();if(r.w*b.width<3||r.h*b.height<3){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}}gesture=null;if(selected>=rects.length)selected=rects.length-1;if(g.picker&&(cancel||g.moved))blockedTaps.add(g.picker);if(!cancel&&g.kind==='move'&&!g.moved){state();if(dirty&&!timer&&!encoding)changed()}else changed()}
+layer.addEventListener('pointerup',e=>finish(e,false));for(const name of ['pointercancel','lostpointercapture'])layer.addEventListener(name,e=>finish(e,true));
 img.addEventListener('contextmenu',e=>{if(dirty||encoding)e.preventDefault()});img.addEventListener('load',()=>{if(!synced)watermarkPreview()});
-function clearState(){revision++;clearTimeout(timer);timer=null;dirty=false;rects=[];selected=-1;pickerMask=null;gesture=null;synced=true;setDrawing(false);retry.hidden=true;if(baseURL)URL.revokeObjectURL(baseURL);baseURL=null;}
-state();retry.hidden=true;return {setBase(blob){clearState();base=blob;baseURL=URL.createObjectURL(blob);if(!textInput.value||textInput.value===defaultText){defaultText=dateText();textInput.value=defaultText}enabled.checked=false;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},reset(){clearState();base=null;enabled.checked=false;defaultText=dateText();for(const [id,value]of Object.entries({'wm-text':defaultText,'wm-position':'bottom-right','wm-size':'34','wm-opacity':'50','wm-color':'#1d3437','privacy-color':'#000000'}))get(id).value=value;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},pauseDrawing(){if(gesture){if(gesture.kind==='new')rects.splice(gesture.index,1);else rects[gesture.index]=gesture.original;gesture=null;selected=Math.min(selected,rects.length-1);changed()}setDrawing(false)},setGenerating(v){generating=v;state()}};
+function clearState(){revision++;clearTimeout(timer);timer=null;dirty=false;rects=[];selected=-1;gesture=null;synced=true;setDrawing(false);retry.hidden=true;if(baseURL)URL.revokeObjectURL(baseURL);baseURL=null;}
+state();retry.hidden=true;return {setBase(blob){clearState();base=blob;baseURL=URL.createObjectURL(blob);if(!textInput.value||textInput.value===defaultText){defaultText=dateText();textInput.value=defaultText}enabled.checked=false;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},reset(){clearState();base=null;enabled.checked=false;defaultText=dateText();for(const [id,value]of Object.entries({'wm-text':defaultText,'wm-position':'bottom-right','wm-size':'34','wm-opacity':'50','wm-color':'#1d3437','privacy-color':'#000000'}))get(id).value=value;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},pauseDrawing(){if(gesture){if(gesture.kind==='new')rects.splice(gesture.index,1);else rects[gesture.index]=gesture.original;gesture=null;selected=Math.min(selected,rects.length-1);changed()}setDrawing(false)},setGenerating(v){generating=v;paint();state()}};
 }
 function bindInstall(){const button=document.getElementById('install'),dialog=document.getElementById('install-dialog'),guide=document.getElementById('install-guide');let deferred=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e});
@@ -88,7 +122,7 @@ window.addEventListener('appinstalled',()=>{deferred=null;button.textContent='�
 if(window.matchMedia('(display-mode: standalone)').matches||navigator.standalone){button.textContent='已在主屏幕打开';button.disabled=true}
 document.getElementById('install-close').addEventListener('click',()=>dialog.close());
 button.addEventListener('click',async()=>{if(deferred){const prompt=deferred;deferred=null;try{await prompt.prompt();const choice=await prompt.userChoice;if(choice.outcome==='accepted'){button.textContent='已发送安装请求';return}}catch(e){/* Display manual instructions below. */}}
-const ios=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);guide.textContent=ios?'1. 请用 Safari 打开本页面。\n2. 点击 Safari 的分享按钮（方框向上箭头）。\n3. 选择“添加到主屏幕”，再点“添加”。\n4. 从主屏幕打开一次，等待离线功能就绪。':/Android/i.test(navigator.userAgent)?'打开浏览器右上角菜单，选择“安装应用”或“添加到主屏幕”，按提示确认。若菜单没有该选项，请用 Chrome 打开。':'Chrome / Edge：打开地址栏旁的安装入口，或在浏览器菜单中选择安装此网页。\nMac Safari：在“文件”菜单中选择“添加到程序坞”。';dialog.showModal()});
+const ios=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);guide.textContent=ios?'1. 请用 Safari 打开本页面。\n2. 点击 Safari 的分享按钮（方框向上箭头）。\n3. 选择“添加到主屏幕”，再点“添加”。':/Android/i.test(navigator.userAgent)?'打开浏览器右上角菜单，选择“安装应用”或“添加到主屏幕”，按提示确认。若菜单没有该选项，请用 Chrome 打开。':'Chrome / Edge：打开地址栏旁的安装入口，或在浏览器菜单中选择安装此网页。\nMac Safari：在“文件”菜单中选择“添加到程序坞”。';dialog.showModal()});
 }
 root.ScrollshotExtras={drawWatermark,drawPrivacy,composeEdits,dateText,bindWatermark,bindInstall};
 })(typeof globalThis==='object'?globalThis:this);
