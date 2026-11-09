@@ -12,7 +12,7 @@ function dateText(date=new Date()){const pad=n=>String(n).padStart(2,'0');return
 function drawPrivacy(ctx,width,height,rects){ctx.save();ctx.globalAlpha=1;for(const r of rects){ctx.fillStyle=/^#[0-9a-f]{6}$/i.test(r.color)?r.color:'#000000';const x=Math.max(0,Math.floor(r.x*width)),y=Math.max(0,Math.floor(r.y*height)),right=Math.min(width,Math.ceil((r.x+r.w)*width)),bottom=Math.min(height,Math.ceil((r.y+r.h)*height));if(right>x&&bottom>y)ctx.fillRect(x,y,right-x,bottom-y)}ctx.restore()}
 function composeEdits(ctx,width,height,options,rects){drawPrivacy(ctx,width,height,rects);drawWatermark(ctx,width,height,options)}
 function bindWatermark(onExport){
-const get=id=>document.getElementById(id),fields=get('wm-fields'),enabled=get('wm-enabled'),message=get('wm-status'),share=get('share'),layer=get('privacy-layer'),privacy=get('privacy-fields'),mode=get('privacy-mode'),done=get('privacy-done'),textInput=get('wm-text'),img=get('result'),retry=get('wm-apply');
+const get=id=>document.getElementById(id),fields=get('wm-fields'),enabled=get('wm-enabled'),message=get('wm-status'),share=get('share'),layer=get('privacy-layer'),privacy=get('privacy-fields'),mode=get('draw-mode'),textInput=get('wm-text'),img=get('result'),retry=get('wm-apply');
 let base=null,baseURL=null,generating=false,encoding=false,dirty=false,timer=null,revision=0,drawing=false,rects=[],selected=-1,gesture=null,synced=true,defaultText=dateText(),wmKey='',controlsFrame=0,maskId=0;
 const viewport=get('editor-viewport'),shell=viewport.parentElement,remove=get('privacy-delete'),swatch=get('privacy-color'),maskNodes=new Map(),blockedTaps=new WeakSet();
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
@@ -39,8 +39,8 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(schedul
 const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.id='watermark-preview';svg.setAttribute('aria-hidden','true');layer.parentElement.appendChild(svg);
 textInput.value=defaultText;for(const name of ['focus','click'])textInput.addEventListener(name,()=>textInput.select());
 const options=()=>({enabled:enabled.checked,text:textInput.value,position:get('wm-position').value,size:get('wm-size').value,opacity:get('wm-opacity').value,color:get('wm-color').value});
-function state(){fields.disabled=generating||!enabled.checked;privacy.disabled=generating;enabled.disabled=generating;done.disabled=generating;share.disabled=!base||generating||dirty||encoding||!!timer||!!gesture;retry.disabled=generating||encoding;remove.disabled=generating||!!gesture;if(remove.disabled)remove.hidden=true;scheduleDelete();}
-function setDrawing(value){drawing=value;if(!value)selected=-1;mode.textContent=value?'结束绘制':'开始框选';mode.setAttribute('aria-pressed',String(value));done.hidden=!value;layer.classList.toggle('drawing',value);layer.style.touchAction=value?'none':'auto';paint();}
+function state(){fields.disabled=generating||!enabled.checked;privacy.disabled=generating;enabled.disabled=generating;mode.disabled=generating;share.disabled=!base||generating||dirty||encoding||!!timer||!!gesture;retry.disabled=generating||encoding;remove.disabled=generating||!!gesture;if(remove.disabled)remove.hidden=true;scheduleDelete();}
+function setDrawing(value){drawing=value;if(!value)selected=-1;mode.setAttribute('aria-pressed',String(value));layer.classList.toggle('drawing',value);layer.style.touchAction=value?'none':'auto';paint();}
 function makeMask(id){
  const el=document.createElement('div'),picker=document.createElement('input');
  el.className='privacy-rect';
@@ -91,7 +91,7 @@ if(rev===revision&&source===base&&!gesture){onExport(blob);dirty=false;const exp
 }catch(e){if(rev===revision){dirty=true;message.textContent=e.message+' 可点击重试。';retry.hidden=false}}finally{if(url)URL.revokeObjectURL(url);if(canvas){canvas.width=0;canvas.height=0}encoding=false;if(rev!==revision&&base&&!gesture&&!generating){clearTimeout(timer);timer=setTimeout(()=>{timer=null;prepare()},0)}state()}}
 function editInput(e){if(e.target===get('privacy-color')&&rects[selected])rects[selected].color=e.target.value;changed()}
 for(const event of ['input','change'])get('watermark-editor').addEventListener(event,editInput);retry.addEventListener('click',()=>{retry.hidden=true;changed()});
-mode.addEventListener('click',()=>setDrawing(!drawing));done.addEventListener('click',()=>setDrawing(false));
+mode.addEventListener('click',()=>{if(generating)return;cancelGesture();setDrawing(!drawing)});
 remove.addEventListener('click',()=>{if(!drawing||generating||gesture||!rects[selected])return;rects.splice(selected,1);selected=-1;changed();viewport.focus({preventScroll:true})});
 get('privacy-clear').addEventListener('click',()=>{rects=[];selected=-1;changed()});
 function point(e){const b=layer.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),y:Math.max(0,Math.min(1,(e.clientY-b.top)/b.height))}}
@@ -101,30 +101,31 @@ layer.addEventListener('pointerdown',e=>{
  if(gesture){if(picker)blockedTaps.add(picker);e.preventDefault();return}
  if(picker)blockedTaps.delete(picker);else e.preventDefault();
  const p=point(e),target=e.target.closest('[data-rect]'),index=target?+target.dataset.rect:-1,corner=e.target.dataset.handle;
- selected=index;const kind=target?(corner?'resize':'move'):'new';
+ const previousSelected=selected;selected=index;const kind=target?(corner?'resize':'move'):'new';
  if(kind==='new'){selected=rects.length;rects.push({id:++maskId,x:p.x,y:p.y,w:0,h:0,color:swatch.value})}else swatch.value=rects[index].color;
- gesture={kind,start:p,startX:e.clientX,startY:e.clientY,pointerId:e.pointerId,moved:false,original:{...rects[selected]},index:selected,corner,picker};
+ gesture={kind,start:p,startX:e.clientX,startY:e.clientY,pointerId:e.pointerId,moved:false,original:{...rects[selected]},index:selected,previousSelected,corner,picker};
  // A tap must end on the same native input, including with pointer capture.
  (picker||layer).setPointerCapture(e.pointerId);
  if(kind==='move'){paint();state()}else changed(false);
 });
 function update(e){if(!gesture||e.pointerId!==gesture.pointerId)return;const p=point(e),g=gesture,r={...g.original};g.moved=g.moved||Math.hypot(e.clientX-g.startX,e.clientY-g.startY)>6;if(g.kind==='move'&&!g.moved)return;if(g.kind==='move'){r.x=Math.max(0,Math.min(1-r.w,r.x+p.x-g.start.x));r.y=Math.max(0,Math.min(1-r.h,r.y+p.y-g.start.y))}else{let left=g.kind==='new'?g.start.x:r.x,right=g.kind==='new'?p.x:r.x+r.w,top=g.kind==='new'?g.start.y:r.y,bottom=g.kind==='new'?p.y:r.y+r.h;if(g.kind==='resize'){if(g.corner.includes('w'))left=p.x;else right=p.x;if(g.corner.includes('n'))top=p.y;else bottom=p.y}r.x=Math.min(left,right);r.y=Math.min(top,bottom);r.w=Math.abs(right-left);r.h=Math.abs(bottom-top)}rects[g.index]=r;changed(false)}
 layer.addEventListener('pointermove',update);
-function finish(e,cancel){if(!gesture||e.pointerId!==gesture.pointerId)return;const g=gesture;if(cancel){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}else{update(e);const r=rects[g.index],b=layer.getBoundingClientRect();if(r.w*b.width<3||r.h*b.height<3){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}}gesture=null;if(selected>=rects.length)selected=rects.length-1;if(g.picker&&(cancel||g.moved))blockedTaps.add(g.picker);if(!cancel&&g.kind==='move'&&!g.moved){state();if(dirty&&!timer&&!encoding)changed()}else changed()}
+function cancelGesture(){
+ if(!gesture)return;
+ const g=gesture;gesture=null;
+ if(g.picker)blockedTaps.add(g.picker);
+ if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original;
+ selected=Math.min(g.previousSelected,rects.length-1);
+ if(rects[selected])swatch.value=rects[selected].color;
+ if(g.kind!=='move'||g.moved||dirty)changed();else{paint();state()}
+}
+function finish(e,cancel){if(!gesture||e.pointerId!==gesture.pointerId)return;if(cancel){cancelGesture();return}const g=gesture;update(e);const r=rects[g.index],b=layer.getBoundingClientRect();if(r.w*b.width<3||r.h*b.height<3){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}gesture=null;if(selected>=rects.length)selected=rects.length-1;if(g.picker&&g.moved)blockedTaps.add(g.picker);if(g.kind==='move'&&!g.moved){state();if(dirty&&!timer&&!encoding)changed()}else changed()}
 layer.addEventListener('pointerup',e=>finish(e,false));for(const name of ['pointercancel','lostpointercapture'])layer.addEventListener(name,e=>finish(e,true));
 img.addEventListener('contextmenu',e=>{if(dirty||encoding)e.preventDefault()});img.addEventListener('load',()=>{if(!synced)watermarkPreview()});
 function clearState(){revision++;clearTimeout(timer);timer=null;dirty=false;rects=[];selected=-1;gesture=null;synced=true;setDrawing(false);retry.hidden=true;if(baseURL)URL.revokeObjectURL(baseURL);baseURL=null;}
-state();retry.hidden=true;return {setBase(blob){clearState();base=blob;baseURL=URL.createObjectURL(blob);if(!textInput.value||textInput.value===defaultText){defaultText=dateText();textInput.value=defaultText}enabled.checked=false;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},reset(){clearState();base=null;enabled.checked=false;defaultText=dateText();for(const [id,value]of Object.entries({'wm-text':defaultText,'wm-position':'bottom-right','wm-size':'34','wm-opacity':'50','wm-color':'#1d3437','privacy-color':'#000000'}))get(id).value=value;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},pauseDrawing(){if(gesture){if(gesture.kind==='new')rects.splice(gesture.index,1);else rects[gesture.index]=gesture.original;gesture=null;selected=Math.min(selected,rects.length-1);changed()}setDrawing(false)},setGenerating(v){generating=v;paint();state()}};
+state();retry.hidden=true;return {setBase(blob){clearState();base=blob;baseURL=URL.createObjectURL(blob);if(!textInput.value||textInput.value===defaultText){defaultText=dateText();textInput.value=defaultText}enabled.checked=false;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},reset(){clearState();base=null;enabled.checked=false;defaultText=dateText();for(const [id,value]of Object.entries({'wm-text':defaultText,'wm-position':'bottom-right','wm-size':'34','wm-opacity':'50','wm-color':'#1d3437','privacy-color':'#000000'}))get(id).value=value;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},cancelGesture,pauseDrawing(){cancelGesture();setDrawing(false)},setGenerating(v){generating=v;paint();state()}};
 }
-function bindInstall(){const button=document.getElementById('install'),dialog=document.getElementById('install-dialog'),guide=document.getElementById('install-guide');let deferred=null;
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e});
-window.addEventListener('appinstalled',()=>{deferred=null;button.textContent='已添加到主屏幕';button.disabled=true});
-if(window.matchMedia('(display-mode: standalone)').matches||navigator.standalone){button.textContent='已在主屏幕打开';button.disabled=true}
-document.getElementById('install-close').addEventListener('click',()=>dialog.close());
-button.addEventListener('click',async()=>{if(deferred){const prompt=deferred;deferred=null;try{await prompt.prompt();const choice=await prompt.userChoice;if(choice.outcome==='accepted'){button.textContent='已发送安装请求';return}}catch(e){/* Display manual instructions below. */}}
-const ios=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);guide.textContent=ios?'1. 请用 Safari 打开本页面。\n2. 点击 Safari 的分享按钮（方框向上箭头）。\n3. 选择“添加到主屏幕”，再点“添加”。':/Android/i.test(navigator.userAgent)?'打开浏览器右上角菜单，选择“安装应用”或“添加到主屏幕”，按提示确认。若菜单没有该选项，请用 Chrome 打开。':'Chrome / Edge：打开地址栏旁的安装入口，或在浏览器菜单中选择安装此网页。\nMac Safari：在“文件”菜单中选择“添加到程序坞”。';dialog.showModal()});
-}
-root.ScrollshotExtras={drawWatermark,drawPrivacy,composeEdits,dateText,bindWatermark,bindInstall};
+root.ScrollshotExtras={drawWatermark,drawPrivacy,composeEdits,dateText,bindWatermark};
 })(typeof globalThis==='object'?globalThis:this);
 
 

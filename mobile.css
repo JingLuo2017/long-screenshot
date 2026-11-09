@@ -48,3 +48,21 @@ html{min-width:0;scroll-padding-top:16px}body{min-width:0;overflow-wrap:break-wo
 .mask-color-hit{position:absolute;inset:0;width:100%;height:100%;min-height:0;margin:0;padding:0;border:0;opacity:0;cursor:pointer;touch-action:none}
 .mask-color-hit:disabled{pointer-events:none}
 .privacy-rect:has(.mask-color-hit:focus-visible){outline:3px solid #3679ef;outline-offset:2px}
+
+/* Keep the product identity and the editor gesture control close to the work. */
+.compact-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px;align-items:center;margin:0 0 12px}
+.compact-hero h1{margin:0;font-size:clamp(26px,4vw,34px);line-height:1.2}
+.compact-hero .intro{display:block;margin:4px 0 0;font-size:15px;font-weight:600;color:var(--muted);line-height:1.4}
+.compact-hero .author-row{width:auto;max-width:none;gap:10px}
+.compact-hero .meta,.compact-hero #update-check-status{grid-column:1/-1}
+.compact-hero .meta{margin:0;gap:4px 10px}
+.compact-hero #update-check-status{margin:0}
+.is-editing .preview-toolbar{display:flex;align-items:center;justify-content:flex-start;gap:9px;padding:5px 7px}
+#draw-mode{flex:0 0 auto;min-height:44px;padding-inline:12px}
+.preview-toolbar .editor-hint{flex:1;min-width:0;margin:0!important;line-height:1.45;color:var(--muted)}
+.is-editing .privacy-actions{grid-template-columns:1fr}
+@media(max-width:520px){
+ .compact-hero{grid-template-columns:1fr;gap:3px;margin-bottom:9px}
+ .compact-hero .author-row{justify-content:space-between;min-height:32px}
+ .compact-hero .version-check{min-height:32px;padding:4px 8px}
+}

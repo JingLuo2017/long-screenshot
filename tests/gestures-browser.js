@@ -1,0 +1,43 @@
+(async()=>{
+ const get=id=>document.getElementById(id),v=get('editor-viewport'),l=get('privacy-layer'),b=get('draw-mode'),note=get('gesture-results');
+ const assert=(test,msg)=>{if(!test)throw Error(msg)},frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ const capture=new Map();
+ Element.prototype.setPointerCapture=function(id){capture.set(id,this)};
+ Element.prototype.hasPointerCapture=function(id){return capture.get(id)===this};
+ Element.prototype.releasePointerCapture=function(id){if(this.hasPointerCapture(id))capture.delete(id)};
+ const fire=(name,id,x,y,target)=>{const box=v.getBoundingClientRect(),node=target||capture.get(id)||v;node.dispatchEvent(new PointerEvent(name,{bubbles:true,cancelable:true,pointerType:'touch',pointerId:id,clientX:box.left+x,clientY:box.top+y}));if(name==='pointerup'||name==='pointercancel')capture.delete(id)};
+ const down=(id,x,y,target)=>fire('pointerdown',id,x,y,target),move=(id,x,y,target)=>fire('pointermove',id,x,y,target),up=(id,x,y)=>fire('pointerup',id,x,y);
+ const count=()=>l.querySelectorAll('.privacy-rect').length;
+ try{
+  await frame();
+  down(1,70,130,v);move(1,70,65);up(1,70,65);
+  assert(v.scrollTop>55&&count()===0,'default single-finger drag pans without drawing');
+  b.click();await frame();
+  assert(b.getAttribute('aria-pressed')==='true','one toggle enters editing');
+  v.scrollTop=0;
+  down(2,48,125,l);move(2,100,95);
+  assert(count()===1,'first finger starts an editable draft');
+  down(3,160,95,l);
+  assert(count()===0&&capture.get(2)===v&&capture.get(3)===v,'second finger rolls back draft and takes both captures');
+  move(2,100,35);move(3,160,35);
+  assert(v.scrollTop>45&&Math.abs(imageViewer.getScale()-1)<.01,'two fingers with fixed distance pan in drawing mode');
+  move(3,220,35);
+  assert(imageViewer.getScale()>1.5,'pinch zooms in drawing mode');
+  up(3,220,35);move(2,120,65,l);up(2,120,65);
+  assert(count()===0,'remaining finger does not start another mask');
+  down(4,45,75,l);move(4,110,120);up(4,110,120);
+  assert(count()===1,'new single finger can draw after pinch');
+  const mask=l.querySelector('.privacy-rect'),picker=mask.querySelector('input');
+  const old=mask.style.left;
+  down(5,75,95,picker);move(5,93,101);assert(mask.style.left!==old,'single finger moves existing mask');
+  down(6,173,92,l);assert(mask.style.left===old,'second finger restores a partially moved mask');
+  up(6,173,92);up(5,93,101);
+  const click=new MouseEvent('click',{bubbles:true,cancelable:true,detail:1});
+  assert(!picker.dispatchEvent(click),'pinch cannot trigger the native color picker');
+  b.click();await frame();
+  assert(b.getAttribute('aria-pressed')==='false'&&picker.hidden&&count()===1,'toggling off retains masks and disables editing');
+  const top=v.scrollTop;down(7,70,155,v);move(7,70,100);up(7,70,100);
+  assert(v.scrollTop>top+40&&count()===1,'single finger returns to panning');
+  note.textContent='PASS single-finger pan, draw toggle, two-finger pan and pinch, mask rollback, no accidental picker, saved masks retained';
+ }catch(e){note.textContent='FAIL '+e.message}
+})();
