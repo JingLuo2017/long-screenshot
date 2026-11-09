@@ -13,13 +13,35 @@ function drawPrivacy(ctx,width,height,rects){ctx.save();ctx.globalAlpha=1;for(co
 function composeEdits(ctx,width,height,options,rects){drawPrivacy(ctx,width,height,rects);drawWatermark(ctx,width,height,options)}
 function bindWatermark(onExport){
 const get=id=>document.getElementById(id),fields=get('wm-fields'),enabled=get('wm-enabled'),message=get('wm-status'),share=get('share'),layer=get('privacy-layer'),privacy=get('privacy-fields'),mode=get('privacy-mode'),done=get('privacy-done'),textInput=get('wm-text'),img=get('result'),retry=get('wm-apply');
-let base=null,baseURL=null,generating=false,encoding=false,dirty=false,timer=null,revision=0,drawing=false,rects=[],selected=-1,gesture=null,synced=true,defaultText=dateText(),wmKey='';
+let base=null,baseURL=null,generating=false,encoding=false,dirty=false,timer=null,revision=0,drawing=false,rects=[],selected=-1,gesture=null,synced=true,defaultText=dateText(),wmKey='',pickerMask=null,controlsFrame=0;
+const viewport=get('editor-viewport'),shell=viewport.parentElement,remove=get('privacy-delete'),picker=get('privacy-native-picker'),swatch=get('privacy-color');
+const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+function visibleBounds(){const v=viewport.getBoundingClientRect(),left=v.left+viewport.clientLeft,top=v.top+viewport.clientTop;return {left,top,right:left+viewport.clientWidth,bottom:top+viewport.clientHeight}}
+function positionDelete(){
+ controlsFrame=0;
+ const el=layer.querySelector(`.privacy-rect[data-rect="${selected}"]`);
+ if(!base||!el||gesture||generating){remove.hidden=true;return}
+ const r=el.getBoundingClientRect(),v=visibleBounds();
+ const left=Math.max(r.left,v.left),right=Math.min(r.right,v.right),top=Math.max(r.top,v.top),bottom=Math.min(r.bottom,v.bottom);
+ const width=64,height=44,gap=4;
+ if(left>=right||top>=bottom||v.right-v.left<width+2*gap||v.bottom-v.top<height+2*gap){remove.hidden=true;return}
+ const above=r.top-v.top,below=v.bottom-r.bottom;
+ const side=above>=height+2*gap?'above':below>=height+2*gap?'below':above>=below?'above':'below';
+ const x=clamp((left+right-width)/2,v.left+gap,v.right-width-gap);
+ const y=clamp(side==='above'?r.top-height-gap:r.bottom+gap,v.top+gap,v.bottom-height-gap);
+ const origin=shell.getBoundingClientRect();
+ remove.style.left=`${x-origin.left-shell.clientLeft}px`;remove.style.top=`${y-origin.top-shell.clientTop}px`;
+ remove.dataset.side=side;remove.setAttribute('aria-label',`删除第 ${selected+1} 处遮盖`);remove.hidden=false;
+}
+function scheduleDelete(){if(!controlsFrame)controlsFrame=requestAnimationFrame(positionDelete)}
+viewport.addEventListener('scroll',scheduleDelete,{passive:true});
+if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(scheduleDelete);observer.observe(viewport);observer.observe(layer)}else window.addEventListener('resize',scheduleDelete);
 const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.id='watermark-preview';svg.setAttribute('aria-hidden','true');layer.parentElement.appendChild(svg);
 textInput.value=defaultText;for(const name of ['focus','click'])textInput.addEventListener(name,()=>textInput.select());
 const options=()=>({enabled:enabled.checked,text:textInput.value,position:get('wm-position').value,size:get('wm-size').value,opacity:get('wm-opacity').value,color:get('wm-color').value});
-function state(){fields.disabled=generating||!enabled.checked;privacy.disabled=generating;enabled.disabled=generating;done.disabled=generating;share.disabled=!base||generating||dirty||encoding||!!timer||!!gesture;retry.disabled=generating||encoding;}
+function state(){fields.disabled=generating||!enabled.checked;privacy.disabled=generating;enabled.disabled=generating;done.disabled=generating;share.disabled=!base||generating||dirty||encoding||!!timer||!!gesture;retry.disabled=generating||encoding;remove.disabled=picker.disabled=generating||!!gesture;if(remove.disabled)remove.hidden=true;scheduleDelete();}
 function setDrawing(value){drawing=value;mode.textContent=value?'结束绘制':'开始框选';mode.setAttribute('aria-pressed',String(value));done.hidden=!value;layer.classList.toggle('drawing',value);layer.style.touchAction=value?'none':'auto';paint();}
-function paint(){layer.replaceChildren();rects.forEach((r,i)=>{const el=document.createElement('div');el.className='privacy-rect'+(drawing&&i===selected?' selected':'');el.dataset.rect=String(i);el.setAttribute('role','button');el.tabIndex=0;el.setAttribute('aria-label',`选中第 ${i+1} 处遮盖`);el.style.cssText=`left:${r.x*100}%;top:${r.y*100}%;width:${r.w*100}%;height:${r.h*100}%;background:${synced?'transparent':r.color}`;if(drawing&&i===selected)for(const corner of ['nw','ne','sw','se']){const handle=document.createElement('span');handle.className='resize-handle '+corner;handle.dataset.handle=corner;handle.dataset.rect=String(i);el.appendChild(handle)}layer.appendChild(el)});get('privacy-count').textContent=`已遮盖 ${rects.length} 处${selected>=0?'，已选中第 '+(selected+1)+' 处':''}。${drawing?'拖动色块移动，拖动角点调整范围。':'开启框选可继续调整。'}`;}
+function paint(){layer.replaceChildren();rects.forEach((r,i)=>{const el=document.createElement('div');el.className='privacy-rect'+(i===selected?' selected':'');el.dataset.rect=String(i);el.setAttribute('role','button');el.tabIndex=0;el.setAttribute('aria-label',`更改第 ${i+1} 处遮盖的颜色`);el.style.cssText=`left:${r.x*100}%;top:${r.y*100}%;width:${r.w*100}%;height:${r.h*100}%;background:${synced?'transparent':r.color}`;if(drawing&&i===selected)for(const corner of ['nw','ne','sw','se']){const handle=document.createElement('span');handle.className='resize-handle '+corner;handle.dataset.handle=corner;handle.dataset.rect=String(i);el.appendChild(handle)}layer.appendChild(el)});get('privacy-count').textContent=`已遮盖 ${rects.length} 处${selected>=0?'，已选中第 '+(selected+1)+' 处':''}。${drawing?'拖动色块移动，拖动角点调整范围。':'开启框选可继续调整。'}`;if(selected<0)remove.hidden=true;scheduleDelete();}
 function watermarkPreview(){const o=options(),w=img.naturalWidth||750,h=img.naturalHeight||1000;const key=JSON.stringify([o,w,h,synced]);if(key===wmKey)return;wmKey=key;svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.hidden=synced||!o.enabled||!o.text.trim();if(svg.hidden)return;const originalSize=Math.max(10,Math.min(72,+o.size||34))*w/750;let font=originalSize,margin=Math.max(10,w*.035),maxWidth=w-margin*2,text=o.text.trim().slice(0,80);const ctx=document.createElement('canvas').getContext('2d');ctx.font=`500 ${font}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;let measured=ctx.measureText(text).width;if(measured>maxWidth){font*=maxWidth/measured;measured=maxWidth}function put(x,y,anchor,rotate){const t=document.createElementNS(svg.namespaceURI,'text');t.textContent=text;t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('text-anchor',anchor);t.setAttribute('dominant-baseline','central');t.setAttribute('fill',o.color);t.setAttribute('opacity',Math.max(.05,Math.min(.8,+o.opacity/100)));t.setAttribute('font-size',font);t.setAttribute('font-weight','500');t.setAttribute('font-family','-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif');if(rotate)t.setAttribute('transform',`rotate(-22.5 ${x} ${y})`);svg.appendChild(t)}
 if(o.position==='tile'){const dx=Math.max(w*.42,measured+margin*2),dy=Math.max(w*.25,originalSize*6);let row=0;for(let y=dy/2;y<h;y+=dy,row++)for(let x=dx/2-(row%2)*dx/2;x<w+dx/2;x+=dx)put(x,y,'middle',true)}else{const p=o.position;let x=p.includes('left')?margin:w-margin,y=p.includes('top')?margin+originalSize/2:h-margin-originalSize/2,anchor=p.includes('left')?'start':'end';if(p==='center'){x=w/2;y=h/2;anchor='middle'}put(x,Math.max(originalSize/2,Math.min(h-originalSize/2,y)),anchor,false)}}
 function live(){synced=false;if(baseURL&&img.src!==baseURL)img.src=baseURL;paint();watermarkPreview();}
@@ -30,19 +52,34 @@ if(rev===revision&&source===base&&!gesture){onExport(blob);dirty=false;const exp
 }catch(e){if(rev===revision){dirty=true;message.textContent=e.message+' 可点击重试。';retry.hidden=false}}finally{if(url)URL.revokeObjectURL(url);if(canvas){canvas.width=0;canvas.height=0}encoding=false;if(rev!==revision&&base&&!gesture&&!generating){clearTimeout(timer);timer=setTimeout(()=>{timer=null;prepare()},0)}state()}}
 function editInput(e){if(e.target===get('privacy-color')&&rects[selected])rects[selected].color=e.target.value;changed()}
 for(const event of ['input','change'])get('watermark-editor').addEventListener(event,editInput);retry.addEventListener('click',()=>{retry.hidden=true;changed()});
-mode.addEventListener('click',()=>setDrawing(!drawing));done.addEventListener('click',()=>setDrawing(false));get('privacy-undo').addEventListener('click',()=>{if(rects.length){rects.pop();selected=rects.length-1;changed()}});get('privacy-clear').addEventListener('click',()=>{rects=[];selected=-1;changed()});
+mode.addEventListener('click',()=>setDrawing(!drawing));done.addEventListener('click',()=>setDrawing(false));
+remove.addEventListener('click',()=>{if(generating||gesture||!rects[selected])return;if(pickerMask===rects[selected])pickerMask=null;rects.splice(selected,1);selected=-1;changed();viewport.focus({preventScroll:true})});
+get('privacy-clear').addEventListener('click',()=>{rects=[];selected=-1;pickerMask=null;changed()});
 function point(e){const b=layer.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),y:Math.max(0,Math.min(1,(e.clientY-b.top)/b.height))}}
 layer.addEventListener('pointerdown',e=>{if(!drawing||generating||!base||gesture||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();const p=point(e),target=e.target.closest('[data-rect]'),index=target?+target.dataset.rect:-1;selected=index;let kind=target?(target.dataset.handle?'resize':'move'):'new';if(kind==='new'){selected=rects.length;rects.push({x:p.x,y:p.y,w:0,h:0,color:get('privacy-color').value})}else get('privacy-color').value=rects[index].color;gesture={kind,start:p,startX:e.clientX,startY:e.clientY,pointerId:e.pointerId,moved:false,original:{...rects[selected]},index:selected,corner:target?.dataset.handle};layer.setPointerCapture(e.pointerId);if(kind==='move'){paint();state()}else changed(false)});
 function update(e){if(!gesture||e.pointerId!==gesture.pointerId)return;const p=point(e),g=gesture,r={...g.original};g.moved=g.moved||Math.hypot(e.clientX-g.startX,e.clientY-g.startY)>6;if(g.kind==='move'&&!g.moved)return;if(g.kind==='move'){r.x=Math.max(0,Math.min(1-r.w,r.x+p.x-g.start.x));r.y=Math.max(0,Math.min(1-r.h,r.y+p.y-g.start.y))}else{let left=g.kind==='new'?g.start.x:r.x,right=g.kind==='new'?p.x:r.x+r.w,top=g.kind==='new'?g.start.y:r.y,bottom=g.kind==='new'?p.y:r.y+r.h;if(g.kind==='resize'){if(g.corner.includes('w'))left=p.x;else right=p.x;if(g.corner.includes('n'))top=p.y;else bottom=p.y}r.x=Math.min(left,right);r.y=Math.min(top,bottom);r.w=Math.abs(right-left);r.h=Math.abs(bottom-top)}rects[g.index]=r;changed(false)}
 layer.addEventListener('pointermove',update);
-function finish(e,cancel){if(!gesture||e.pointerId!==gesture.pointerId)return;const g=gesture,tap=!cancel&&g.kind==='move'&&!g.moved&&Math.hypot(e.clientX-g.startX,e.clientY-g.startY)<=6;if(cancel){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}else{update(e);const r=rects[g.index],b=layer.getBoundingClientRect();if(r.w*b.width<3||r.h*b.height<3){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}}gesture=null;if(selected>=rects.length)selected=rects.length-1;if(tap){selectMask(g.index);state()}else changed()}
+function finish(e,cancel){if(!gesture||e.pointerId!==gesture.pointerId)return;const g=gesture,tap=!cancel&&g.kind==='move'&&!g.moved&&Math.hypot(e.clientX-g.startX,e.clientY-g.startY)<=6;if(cancel){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}else{update(e);const r=rects[g.index],b=layer.getBoundingClientRect();if(r.w*b.width<3||r.h*b.height<3){if(g.kind==='new')rects.splice(g.index,1);else rects[g.index]=g.original}}gesture=null;if(selected>=rects.length)selected=rects.length-1;if(tap){state();openMaskColor(g.index,e)}else changed()}
 layer.addEventListener('pointerup',e=>finish(e,false));layer.addEventListener('pointercancel',e=>finish(e,true));
-function selectMask(index){if(generating||gesture||!Number.isInteger(index)||!rects[index])return;selected=index;get('privacy-color').value=rects[index].color;paint()}
-layer.addEventListener('mask-select-request',e=>selectMask(e.detail?.index));
-layer.addEventListener('keydown',e=>{const rect=e.target.closest('[data-rect]');if(rect&&!rect.dataset.handle&&(e.key==='Enter'||e.key===' ')){e.preventDefault();selectMask(+rect.dataset.rect)}});
-layer.addEventListener('click',e=>{const rect=e.target.closest('[data-rect]');if(e.detail===0&&rect&&!rect.dataset.handle)selectMask(+rect.dataset.rect)});
+function openMaskColor(index,point){
+ if(!base||generating||gesture||!Number.isInteger(index)||!rects[index])return;
+ selected=index;pickerMask=rects[index];picker.value=swatch.value=pickerMask.color;paint();
+ const mask=layer.querySelector(`.privacy-rect[data-rect="${index}"]`).getBoundingClientRect(),v=visibleBounds(),origin=shell.getBoundingClientRect();
+ picker.style.left=`${clamp(point?.clientX??(mask.left+mask.right)/2,v.left,v.right)-origin.left-shell.clientLeft}px`;
+ picker.style.top=`${clamp(point?.clientY??(mask.top+mask.bottom)/2,v.top,v.bottom)-origin.top-shell.clientTop}px`;
+ // Open during the tap/key event so the browser can use its native picker.
+ try{if(typeof picker.showPicker==='function'){picker.showPicker();return}}catch{}
+ picker.click();
+}
+for(const event of ['input','change'])picker.addEventListener(event,()=>{
+ if(generating||!pickerMask||!rects.includes(pickerMask)||pickerMask.color===picker.value)return;
+ pickerMask.color=picker.value;if(rects[selected]===pickerMask)swatch.value=picker.value;changed();
+});
+layer.addEventListener('mask-select-request',e=>openMaskColor(e.detail?.index,e.detail));
+layer.addEventListener('keydown',e=>{const rect=e.target.closest('[data-rect]');if(rect&&!rect.dataset.handle&&(e.key==='Enter'||e.key===' ')){e.preventDefault();if(!e.repeat)openMaskColor(+rect.dataset.rect)}});
+layer.addEventListener('click',e=>{const rect=e.target.closest('[data-rect]');if(e.detail===0&&rect&&!rect.dataset.handle)openMaskColor(+rect.dataset.rect)});
 img.addEventListener('contextmenu',e=>{if(dirty||encoding)e.preventDefault()});img.addEventListener('load',()=>{if(!synced)watermarkPreview()});
-function clearState(){revision++;clearTimeout(timer);timer=null;dirty=false;rects=[];selected=-1;gesture=null;synced=true;setDrawing(false);retry.hidden=true;if(baseURL)URL.revokeObjectURL(baseURL);baseURL=null;}
+function clearState(){revision++;clearTimeout(timer);timer=null;dirty=false;rects=[];selected=-1;pickerMask=null;gesture=null;synced=true;setDrawing(false);retry.hidden=true;if(baseURL)URL.revokeObjectURL(baseURL);baseURL=null;}
 state();retry.hidden=true;return {setBase(blob){clearState();base=blob;baseURL=URL.createObjectURL(blob);if(!textInput.value||textInput.value===defaultText){defaultText=dateText();textInput.value=defaultText}enabled.checked=false;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},reset(){clearState();base=null;enabled.checked=false;defaultText=dateText();for(const [id,value]of Object.entries({'wm-text':defaultText,'wm-position':'bottom-right','wm-size':'34','wm-opacity':'50','wm-color':'#1d3437','privacy-color':'#000000'}))get(id).value=value;watermarkPreview();message.textContent='编辑会实时预览并自动同步到保存图片。';state()},pauseDrawing(){if(gesture){if(gesture.kind==='new')rects.splice(gesture.index,1);else rects[gesture.index]=gesture.original;gesture=null;selected=Math.min(selected,rects.length-1);changed()}setDrawing(false)},setGenerating(v){generating=v;state()}};
 }
 function bindInstall(){const button=document.getElementById('install'),dialog=document.getElementById('install-dialog'),guide=document.getElementById('install-guide');let deferred=null;
