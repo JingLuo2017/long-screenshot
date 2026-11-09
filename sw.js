@@ -1,9 +1,9 @@
 /* A release is cached atomically; activation of a newer release requires user consent. */
-const VERSION='1.8.6';
+const VERSION='1.8.7';
 const PAGE_URL=new URL('./',self.registration.scope).href;
 const PREFIX='scrollshot-'+encodeURIComponent(new URL(PAGE_URL).pathname)+'-v';
 const CACHE_NAME=PREFIX+VERSION;
-const ASSETS=['./core.js?v=1.4.1','./extras.js?v=1.8.6','./flow.js?v=1.8','./editor.js?v=1.8.6','./updates.js?v=1.8.6','./mobile.css?v=1.8.6','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
+const ASSETS=['./core.js?v=1.4.1','./extras.js?v=1.8.7','./flow.js?v=1.8.7','./crop.js?v=1.8.7','./generation.js?v=1.8.7','./editor.js?v=1.8.7','./updates.js?v=1.8.7','./mobile.css?v=1.8.7','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil((async()=>{try{const cache=await caches.open(CACHE_NAME),response=await fetch(PAGE_URL,{cache:'reload'});if(!response.ok)throw Error('Page download failed');const html=await response.clone().text();if(!html.includes('name="app-version" content="'+VERSION+'"'))throw Error('Release files are not synchronized');await cache.put(PAGE_URL,response);await cache.addAll(ASSETS.map(p=>new URL(p,PAGE_URL).href));await cache.put(new URL('__ready__',PAGE_URL),new Response(VERSION))}catch(e){await caches.delete(CACHE_NAME);throw e}})()));
 self.addEventListener('message',event=>{if(event.data?.type==='GET_VERSION')event.ports[0]?.postMessage({version:VERSION});if(event.data?.type==='ACTIVATE_VERSION'&&event.data.version===VERSION)event.waitUntil(self.skipWaiting())});
 self.addEventListener('activate',event=>event.waitUntil((async()=>{const names=await caches.keys(),owned=names.filter(n=>n.startsWith(PREFIX)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),keep=new Set([CACHE_NAME,...owned.filter(n=>n!==CACHE_NAME).slice(-1)]);await Promise.all(owned.filter(n=>!keep.has(n)).map(n=>caches.delete(n)));await self.clients.claim()})()));
