@@ -1,10 +1,10 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 require('../editor.js');require('../updates.js');
-const VERSION=ScrollshotUpdates.VERSION,NEXT='1.9.3',scope='https://example.test/long-screenshot/';
+const VERSION=ScrollshotUpdates.VERSION,NEXT='1.9.4',scope='https://example.test/long-screenshot/';
 const cacheName=ScrollshotUpdates.cacheName(scope);
 assert.equal(ScrollshotUpdates.compareVersions('1.10.0','1.9.9'),1);
 assert.equal(ScrollshotUpdates.compareVersions(VERSION,VERSION),0);
-assert.equal(ScrollshotUpdates.compareVersions('1.9.1',VERSION),-1);
+assert.equal(ScrollshotUpdates.compareVersions('1.9.2',VERSION),-1);
 assert.notEqual(cacheName,ScrollshotUpdates.cacheName('https://example.test/other/'));
 for(const old of [1,1.25,2,4])for(const next of [1,1.5,3,4])for(const scroll of [0,100,1400]){
  const anchor=120,s=ScrollshotViewer.zoomAnchor(scroll,anchor,old,next);
@@ -19,12 +19,12 @@ const staticURLs=[...new Set([...links,...manifest.icons.map(x=>x.src)].map(x=>n
 async function cacheTest(failure){
  const handlers={},files=new Map(),requests=[];
  let activated=0,claimed=0,networkAvailable=true,task,reportedVersion;
- const prior=ScrollshotUpdates.cacheName(scope,'1.9.1'),older=ScrollshotUpdates.cacheName(scope,'1.8.7'),foreign=ScrollshotUpdates.cacheName('https://example.test/other/');
+ const prior=ScrollshotUpdates.cacheName(scope,'1.9.2'),older=ScrollshotUpdates.cacheName(scope,'1.8.7'),foreign=ScrollshotUpdates.cacheName('https://example.test/other/');
  const entries=new Set([prior,older,foreign]);
  async function fetch(url){
   if(!networkAvailable)throw Error('Network is unavailable');
   const key=String(url);
-  if(key===scope)return new Response(failure==='stale'?page.replace(`content="${VERSION}"`,'content="1.9.1"'):page);
+  if(key===scope)return new Response(failure==='stale'?page.replace(`content="${VERSION}"`,'content="1.9.2"'):page);
   if(failure==='asset'||!staticURLs.includes(key))throw Error('Asset unavailable');
   requests.push(key);
   return new Response('asset '+key);

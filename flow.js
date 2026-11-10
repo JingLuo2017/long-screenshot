@@ -1,7 +1,7 @@
 (function(root){
 'use strict';
 function mount(options){
- const get=id=>document.getElementById(id),file=get('file'),go=get('go'),quick=get('quick-generate'),recordingStatus=get('recording-status'),quickStatus=get('quick-status');
+ const get=id=>document.getElementById(id),file=get('file'),go=get('go'),quick=get('quick-generate'),recordingStatus=get('recording-status'),retryRecording=get('retry-recording'),quickStatus=get('quick-status');
  const clearDialog=get('clear-dialog');
  const originalGenerate=go.onclick,recommended=['12','12','45','jpeg'].join('|'),key=()=>['top','bottom','seam','format'].map(id=>get(id).value).join('|');
  let step=1,resultKey=null,resultFile=null,resultStatus=null,resultReturnStep=2,running=false,probe=null,validatedFile=null;
@@ -29,7 +29,7 @@ function mount(options){
   refresh();get('step-announcement').focus({preventScroll:true});
  }
  function stopProbe(){const old=probe;probe=null;old?.abort();}
- function resetSelection(){stopProbe();validatedFile=null;recordingStatus.textContent='';recordingStatus.removeAttribute('data-kind');quickStatus.textContent='';}
+ function resetSelection(){stopProbe();validatedFile=null;recordingStatus.textContent='';recordingStatus.removeAttribute('data-kind');retryRecording.hidden=true;quickStatus.textContent='';}
  async function inspectSelection(){
   resetSelection();const selected=file.files[0];get('status').textContent='请选择一段录屏。';
   if(!selected){refresh();return;}
@@ -45,6 +45,7 @@ function mount(options){
   }catch(error){
    if(probe!==controller||file.files[0]!==selected)return;
    recordingStatus.dataset.kind='error';recordingStatus.textContent=options.inspectError(error);
+   retryRecording.hidden=error?.code!=='MEDIA_TIMEOUT';
   }finally{if(probe===controller){probe=null;refresh();}}
  }
  function clear(){
@@ -70,6 +71,12 @@ function mount(options){
  document.querySelectorAll('[data-back]').forEach(b=>b.addEventListener('click',()=>{if(!busy()&&step>1)show(step===3?resultReturnStep:1);}));
  document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',clear));
  file.addEventListener('change',inspectSelection);
+ file.addEventListener('click',()=>{
+  // Browsers can suppress change when the user picks the same file again.
+  // Clear a failed choice before reopening the picker, never a usable one.
+  if(recordingStatus.dataset.kind==='error'&&!busy()){file.value='';inspectSelection();}
+ });
+ retryRecording.addEventListener('click',()=>{if(!busy()&&!probe&&!retryRecording.hidden)inspectSelection();});
  for(const id of ['top','bottom','seam','format'])get(id).addEventListener('change',refresh);
  async function generate(){
   if(busy()||!ready())return;

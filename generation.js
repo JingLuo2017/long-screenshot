@@ -12,22 +12,57 @@ function cancellable(signal,start){
   try{dispose=start(value=>finish(resolve,value),error=>finish(reject,error));if(settled)dispose?.();}catch(error){finish(reject,error);}
  });
 }
-function metadata(video,signal){
+const mediaEvents=['loadedmetadata','loadeddata','canplay','progress','durationchange','playing'];
+function mediaReady(video,signal,{stage,minState,timeout,kick}){
  return cancellable(signal,(resolve,reject)=>{
-  const loaded=()=>resolve(),failed=()=>reject(Error('无法读取录屏'));
-  const timeout=setTimeout(()=>reject(Error('读取录屏超时')),12000);
-  video.addEventListener('loadedmetadata',loaded);video.addEventListener('error',failed);
-  return ()=>{clearTimeout(timeout);video.removeEventListener('loadedmetadata',loaded);video.removeEventListener('error',failed);};
+  let remaining=timeout,last=performance.now(),foreground=!document.hidden,timer=null,kicked=false;
+  const failed=()=>reject(Error(stage==='metadata'?'无法读取录屏':'无法解码录屏'));
+  function check(){
+   clearTimeout(timer);
+   const now=performance.now();
+   if(foreground)remaining-=now-last;
+   last=now;foreground=!document.hidden;
+   if(video.error){failed();return;}
+   if(video.readyState>=minState){resolve();return;}
+   if(remaining<=0){
+    reject(Object.assign(Error(stage==='metadata'?'读取录屏信息超时':'读取首帧超时'),{code:'MEDIA_TIMEOUT',stage}));
+    return;
+   }
+   if(!foreground)return;
+   timer=setTimeout(check,Math.min(180,remaining));
+   if(kick&&!kicked&&timeout-remaining>=1500){kicked=true;kick();}
+  }
+  for(const type of mediaEvents)video.addEventListener(type,check);
+  video.addEventListener('error',failed);document.addEventListener('visibilitychange',check);check();
+  return ()=>{clearTimeout(timer);for(const type of mediaEvents)video.removeEventListener(type,check);video.removeEventListener('error',failed);document.removeEventListener('visibilitychange',check);};
  });
+}
+function metadata(video,signal){
+ return mediaReady(video,signal,{stage:'metadata',minState:1,timeout:16000});
+}
+function firstFrame(video,signal){
+ return mediaReady(video,signal,{stage:'first-frame',minState:2,timeout:18000,kick(){
+  // If the browser only preloads metadata, request muted inline decoding once.
+  // Autoplay can be denied; readiness still comes from the media element.
+  try{video.play()?.then(()=>video.pause(),()=>{});}catch{}
+ }});
 }
 const MAX_DURATION=90;
 function openMedia(source,signal){
  const url=URL.createObjectURL(source),video=document.createElement('video');
- video.preload='auto';video.muted=true;video.playsInline=true;
+ video.preload='auto';video.defaultMuted=video.muted=true;video.playsInline=true;
  // Keep the decoder attached for mobile browsers that defer detached video rendering.
  video.style.cssText='position:fixed;width:2px;height:2px;left:0;bottom:0;opacity:.01;pointer-events:none';video.setAttribute('aria-hidden','true');document.body.appendChild(video);
- const ready=metadata(video,signal);video.src=url;
- return {video,ready,close(){video.pause();video.removeAttribute('src');video.load();video.remove();URL.revokeObjectURL(url);}};
+ const ready=metadata(video,signal);
+ let closed=false;
+ function close(){
+  if(closed)return;closed=true;
+  signal.removeEventListener('abort',close);
+  video.pause();video.removeAttribute('src');video.load();video.remove();URL.revokeObjectURL(url);
+ }
+ signal.addEventListener('abort',close,{once:true});
+ video.src=url;
+ return {video,ready,close};
 }
 function videoInfo(video){
  const duration=video.duration,width=video.videoWidth,height=video.videoHeight;
@@ -36,19 +71,20 @@ function videoInfo(video){
  return {duration,width,height};
 }
 async function inspect(source,signal){
- checkAbort(signal);const media=openMedia(source,signal);
+ checkAbort(signal);if(!source||source.size===0)throw Error('录屏为空');const media=openMedia(source,signal);
  try{
   await media.ready;checkAbort(signal);
   const info=videoInfo(media.video);
-  if(media.video.readyState<2)await seek(media.video,Math.min(.08,info.duration/2),signal);
-  checkAbort(signal);if(media.video.readyState<2)throw Error('无法解码录屏');
+  // A valid selection only needs a decoded first frame, not an exact seek or
+  // a browser paint callback. Frame seeking remains part of generation only.
+  await firstFrame(media.video,signal);checkAbort(signal);
   return info;
  }finally{media.close();}
 }
 function inspectError(error){
  const message=String(error?.message||'');
  if(message.includes('90 秒'))return '这段录屏超过 90 秒。请在相册中裁短后重新选择。';
- if(message.includes('超时'))return '读取录屏超时。请保持页面在前台，再重新选择这段录屏。';
+ if(error?.code==='MEDIA_TIMEOUT')return error.stage==='metadata'?'读取录屏信息超时。请确认文件已下载到本机，再点「重试读取」。':'读取首帧超时。请保持页面在前台，再点「重试读取」。';
  return '无法读取这段录屏。请确认它能在相册播放，或选择另一段录屏。';
 }
 function seek(video,time,signal){
