@@ -124,6 +124,10 @@ body.is-substep .compact-topbar{display:none}
 .crop-preview-rail{flex:1;min-height:0;display:flex;justify-content:center;align-items:center;padding:6px;background:#eef3fb;border-radius:12px;overflow:hidden}
 #crop-stage{width:auto;height:100%;max-height:100%;max-width:100%;aspect-ratio:var(--crop-ratio)}
 .crop-scrubber{flex:none;padding-top:4px}
+#crop-frame-time[data-state="seeking"]{color:var(--brand)}
+#crop-frame-time[data-state="error"]{color:#a63724}
+#crop-preview-status:not([hidden]){position:relative;z-index:5;max-width:100%;padding:8px 10px;background:var(--surface);border-radius:8px}
+#crop-preview-retry{position:absolute;top:85px;left:50%;transform:translateX(-50%);z-index:5;min-height:44px}
 .crop-frame-label{margin:0 0 2px}
 .trim-controls{margin:4px 0 0}
 .trim-buttons .button{min-height:38px;font-size:12px}

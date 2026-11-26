@@ -14,12 +14,74 @@ const read=(key,min,max)=>clamp(Number.isFinite(values[key])?values[key]:DEFAULT
 const top=read('top',0,LIMIT),bottom=read('bottom',0,limitFor(top)),seam=read('seam',25,70);
 return {top,bottom,seam,kept:100-top-bottom,line:top+(100-top-bottom)*seam/100};
 }
+/* A single outstanding seek, with the latest requested time replacing queued work.
+   Poll as well as listening for seeked: WebKit can omit that event after a rapid drag. */
+function createFrameSeeker(video,onState){
+ const EPS=0.015,TIMEOUT=5000;
+ let latest=null,confirmed=null,job=null,timer=0,raf=0,frame=0,disposed=false,phase='idle';
+ const visible=()=>typeof document==='undefined'||document.visibilityState!=='hidden';
+ const matches=target=>!video.seeking&&video.readyState>=2&&Math.abs(video.currentTime-target)<=EPS;
+ function cancelRender(){
+  if(raf)cancelAnimationFrame(raf);raf=0;
+  if(frame&&video.cancelVideoFrameCallback)video.cancelVideoFrameCallback(frame);frame=0;
+ }
+ function clearWork(){if(timer)clearTimeout(timer);timer=0;cancelRender();job=null;}
+ function report(next,error){phase=next;onState({phase,target:latest,time:confirmed,error});}
+ function arm(){if(!timer&&!disposed&&job&&visible())timer=setTimeout(()=>{timer=0;check();},100);}
+ function fail(){clearWork();report('error','画面定位暂未完成，请点“重试预览”。录屏和已选片段均已保留。');}
+ function finish(expected){
+  if(disposed||job!==expected||!visible()||!matches(expected.target))return;
+  confirmed=video.currentTime;clearWork();
+  if(Math.abs(latest-confirmed)>EPS)start();
+  else report('ready');
+ }
+ function render(expected){
+  if(raf||frame)return;
+  // A decoded frame must reach the presentation step before enabling trim buttons.
+  // Two animation frames also cover paused WebKit videos without a frame callback.
+  if(video.requestVideoFrameCallback)frame=video.requestVideoFrameCallback((_,meta)=>{
+   if(disposed||job!==expected)return;
+   frame=0;
+   if(meta&&Math.abs(meta.mediaTime-expected.target)<0.12)finish(expected);
+  });
+  raf=requestAnimationFrame(()=>{raf=requestAnimationFrame(()=>{raf=0;finish(expected);});});
+ }
+ function check(){
+  if(disposed||!job||!visible())return;
+  if(matches(job.target))render(job);
+  else{cancelRender();if(Date.now()-job.started>=TIMEOUT){fail();return;}}
+  arm();
+ }
+ function start(){
+  if(disposed||job||latest===null)return;
+  job={target:latest,started:Date.now()};
+  try{video.pause();video.currentTime=job.target;}catch(_){fail();return;}
+  check();
+ }
+ function request(value){
+  if(disposed||!Number.isFinite(value))return;
+  latest=clamp(value,0,Math.max(0,video.duration-0.001));
+  if(phase==='ready'&&Math.abs(latest-confirmed)<=EPS&&matches(confirmed))return;
+  report('seeking');start();arm();
+ }
+ function visibility(){
+  if(!visible()){if(timer)clearTimeout(timer);timer=0;cancelRender();}
+  else if(job){job.started=Date.now();check();}
+ }
+ const events=['seeked','loadeddata','canplay'];
+ for(const name of events)video.addEventListener(name,check);
+ if(typeof document!=='undefined')document.addEventListener('visibilitychange',visibility);
+ return {request,current(){return phase==='ready'&&!job&&confirmed!==null&&matches(confirmed)?confirmed:null;},target(){return latest;},dispose(){disposed=true;clearWork();for(const name of events)video.removeEventListener(name,check);if(typeof document!=='undefined')document.removeEventListener('visibilitychange',visibility);}};
+}
 function mount(){
 const get=id=>document.getElementById(id),file=get('file'),stage=get('crop-stage'),video=get('crop-video'),preview=get('crop-preview'),seek=get('crop-frame'),notice=get('crop-preview-status'),fine=get('crop-precision'),rangeText=get('crop-retained'),frameText=get('crop-frame-time');
 const trimStartBtn=get('trim-set-start'),trimEndBtn=get('trim-set-end'),trimResetBtn=get('trim-reset'),trimSummary=get('trim-summary');
 const input=Object.fromEntries(Object.keys(DEFAULTS).map(id=>[id,get(id)]));
 const handles={top:get('crop-top-handle'),bottom:get('crop-bottom-handle')};
-let active=false,suspended=false,clip=null,url=null,position=null,drag=null,seekTimer=0,duration=0,trimStart=0,trimEnd=0,pendingSeek=null,seekInFlightAt=0,trimNote='';
+const retry=get('crop-preview-retry');
+let active=false,suspended=false,clip=null,url=null,position=null,drag=null,duration=0,trimStart=0,trimEnd=0,trimNote='',seeker=null,recoveryCount=0,recoveryTimer=0;
+function lockTrim(locked){if(trimStartBtn)trimStartBtn.disabled=locked;if(trimEndBtn)trimEndBtn.disabled=locked;preview.setAttribute('aria-busy',String(locked));}
+lockTrim(true);
 const values=()=>Object.fromEntries(Object.entries(input).map(([id,el])=>[id,el.valueAsNumber]));
 const readable=value=>Number(value.toFixed(1));
 function paintTrim(){
@@ -68,8 +130,8 @@ function syncFields(){for(const el of Object.values(input))el.removeAttribute('a
 for(const el of Object.values(input))el.addEventListener('input',syncFields);
 get('crop-defaults').addEventListener('click',()=>{for(const [id,value] of Object.entries(DEFAULTS)){input[id].value=value;input[id].dispatchEvent(new Event('change',{bubbles:true}));}syncFields()});
 trimStartBtn?.addEventListener('click',()=>{
- if(!duration)return;
- const minSpan=Math.min(0.5,duration*0.5),raw=Number(seek.value),current=clamp(Number.isFinite(raw)?raw:0,0,duration);
+ const confirmed=seeker?.current();if(!duration||confirmed==null)return;
+ const minSpan=Math.min(0.5,duration*0.5),current=clamp(confirmed,0,duration);
  trimNote='';
  if(current<=(trimEnd||duration)-minSpan){
   trimStart=current;
@@ -81,8 +143,8 @@ trimStartBtn?.addEventListener('click',()=>{
  notifyTrim();
 });
 trimEndBtn?.addEventListener('click',()=>{
- if(!duration)return;
- const minSpan=Math.min(0.5,duration*0.5),raw=Number(seek.value),current=clamp(Number.isFinite(raw)?raw:duration,0,duration);
+ const confirmed=seeker?.current();if(!duration||confirmed==null)return;
+ const minSpan=Math.min(0.5,duration*0.5),current=clamp(confirmed,0,duration);
  trimNote='';
  if(current>=trimStart+minSpan){
   trimEnd=current;
@@ -94,38 +156,20 @@ trimEndBtn?.addEventListener('click',()=>{
  notifyTrim();
 });
 trimResetBtn?.addEventListener('click',()=>{if(!duration)return;trimStart=0;trimEnd=duration;trimNote='';notifyTrim();});
-function flushSeek(exact=false){
- if(!url||video.readyState<1||pendingSeek===null)return;
- if(!exact&&video.seeking&&Date.now()-seekInFlightAt<450)return;
- const target=clamp(pendingSeek,0,Math.max(0,(Number.isFinite(video.duration)?video.duration:duration)-0.001));
- pendingSeek=null;
- seekInFlightAt=Date.now();
- try{video.currentTime=target;}catch(_){}
-}
-video.addEventListener('seeked',()=>{seekInFlightAt=0;if(pendingSeek!==null)flushSeek(false);});
-function scheduleSeek(exact=false){
- if(seekTimer){clearTimeout(seekTimer);seekTimer=0;}
- if(exact){flushSeek(true);return;}
- if(!video.seeking||Date.now()-seekInFlightAt>=450){
-  flushSeek(false);
- }else{
-  seekTimer=setTimeout(()=>{seekTimer=0;flushSeek(false);},90);
- }
-}
 function detach(keep=true){
- drag=null;pendingSeek=null;seekInFlightAt=0;if(seekTimer){clearTimeout(seekTimer);seekTimer=0;}
- if(keep&&url&&video.readyState>=1&&Number.isFinite(video.currentTime))position=video.currentTime;
+ drag=null;if(recoveryTimer)clearTimeout(recoveryTimer);recoveryTimer=0;
+ if(keep&&url)position=seeker?.target()??position;
+ seeker?.dispose();seeker=null;lockTrim(true);if(retry)retry.hidden=true;
  video.onloadedmetadata=video.onloadeddata=video.onerror=null;
  if(url){video.pause();video.removeAttribute('src');video.load();URL.revokeObjectURL(url);url=null;}
  preview.hidden=true;
 }
-function updateFrame(){frameText.textContent=`${Number(seek.value).toFixed(1)} / ${video.duration.toFixed(1)} 秒`;}
 function attach(){
  const selected=file.files[0]||null;
- if(selected!==clip){detach(false);clip=selected;position=null;duration=0;trimStart=0;trimEnd=0;trimNote='';paintTrim();}
+ if(selected!==clip){detach(false);clip=selected;position=null;duration=0;trimStart=0;trimEnd=0;trimNote='';recoveryCount=0;paintTrim();}
  if(!active||suspended||!clip||!get('capture-settings').open){detach();return;}
  if(url)return;
- notice.hidden=false;notice.textContent='正在读取录屏预览…';
+ notice.hidden=false;notice.textContent='正在读取录屏预览…';lockTrim(true);
  const expected=URL.createObjectURL(clip);url=expected;
  video.onloadedmetadata=()=>{
   if(url!==expected)return;
@@ -134,18 +178,32 @@ function attach(){
   if(!duration||Math.abs(duration-nextDur)>0.05){duration=nextDur;trimStart=0;trimEnd=nextDur;trimNote='';}
   stage.style.setProperty('--crop-ratio',String(video.videoWidth/video.videoHeight));
   seek.max=Math.max(0,nextDur-.02);seek.value=clamp(position??Math.min(.7,nextDur*.2),0,Number(seek.max));
-  pendingSeek=Number(seek.value);flushSeek(true);
-  setTimeout(()=>{if(url===expected&&video.readyState<2){try{video.play()?.then(()=>{if(url===expected){video.pause();pendingSeek=Number(seek.value);flushSeek(true);}},()=>{});}catch(_){}}},260);
-  updateFrame();preview.hidden=false;notice.hidden=true;paint();requestAnimationFrame(fitStage);
+  seeker?.dispose();
+  seeker=createFrameSeeker(video,state=>{
+   if(url!==expected)return;
+   const waiting=state.phase!=='ready';lockTrim(waiting);
+   frameText.dataset.state=state.phase;
+   frameText.textContent=state.phase==='ready'?`${state.time.toFixed(1)} / ${duration.toFixed(1)} 秒`:state.phase==='error'?'定位未完成':`正在定位 ${state.target.toFixed(1)} 秒…`;
+   if(state.phase==='ready'){position=state.time;recoveryCount=0;notice.hidden=true;if(retry)retry.hidden=true;}
+   if(state.phase==='error'){
+    if(recoveryCount<1){
+     recoveryCount++;position=state.target;
+     notice.hidden=false;notice.textContent='正在重新读取预览，已保留录屏与片段设置…';
+     recoveryTimer=setTimeout(()=>{recoveryTimer=0;if(url!==expected)return;detach();attach();},0);
+    }else{notice.hidden=false;notice.textContent=state.error;if(retry)retry.hidden=false;}
+   }
+  });
+  preview.hidden=false;notice.hidden=true;paint();requestAnimationFrame(fitStage);
+  seeker.request(Number(seek.value));
  };
- video.onerror=()=>{if(url!==expected)return;preview.hidden=true;notice.hidden=false;notice.textContent='无法读取录屏预览。请确认视频能在相册播放，或换一段录屏。';};
+ video.onerror=()=>{if(url!==expected)return;seeker?.dispose();seeker=null;lockTrim(true);preview.hidden=true;notice.hidden=false;notice.textContent='无法读取录屏预览。请确认视频能在相册播放，或换一段录屏。';if(retry)retry.hidden=false;};
  video.src=expected;
 }
-seek.addEventListener('input',()=>{if(!url||video.readyState<1)return;updateFrame();pendingSeek=Number(seek.value);scheduleSeek(false);});
-seek.addEventListener('change',()=>{if(!url||video.readyState<1)return;updateFrame();pendingSeek=Number(seek.value);scheduleSeek(true);});
+for(const event of ['input','change'])seek.addEventListener(event,()=>{if(!url||video.readyState<1||!seeker)return;seeker.request(Number(seek.value));});
+retry?.addEventListener('click',()=>{recoveryCount=0;detach();attach();});
 file.addEventListener('change',attach);get('capture-settings').addEventListener('toggle',attach);
 paint();
 return {values,trim(){return duration?{startTime:trimStart,endTime:trimEnd||duration,duration}:{startTime:0,endTime:null,duration:0};},showError(error){get('capture-settings').open=true;fine.open=true;const fd=get('s2-fine-drawer');if(fd)fd.hidden=false;get('s2-tab-fine')?.setAttribute('aria-pressed','true');input[error.id].setAttribute('aria-invalid','true');requestAnimationFrame(()=>input[error.id].focus());},setActive(value){active=value;if(!value)suspended=false;attach();},suspend(){suspended=true;detach();},resume(){suspended=false;attach();},reset(){detach(false);clip=null;position=null;duration=0;trimStart=0;trimEnd=0;trimNote='';active=suspended=false;get('capture-settings').open=true;fine.open=true;const fd=get('s2-fine-drawer');if(fd)fd.hidden=true;get('s2-tab-fine')?.setAttribute('aria-pressed','false');syncFields();}};
 }
-root.ScrollshotCrop={mount,validate,geometry,limitFor};
+root.ScrollshotCrop={mount,validate,geometry,limitFor,createFrameSeeker};
 })(typeof globalThis==='object'?globalThis:this);
