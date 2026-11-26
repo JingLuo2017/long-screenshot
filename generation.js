@@ -89,7 +89,9 @@ function inspectError(error){
 }
 function seek(video,time,signal){
  checkAbort(signal);
- if(Math.abs(video.currentTime-time)<.0001&&video.readyState>=2&&!video.seeking)return Promise.resolve();
+ const maxTime=Number.isFinite(video.duration)&&video.duration>0?Math.max(0,video.duration-0.001):time;
+ const targetTime=Math.max(0,Math.min(time,maxTime));
+ if(Math.abs(video.currentTime-targetTime)<.0001&&video.readyState>=2&&!video.seeking)return Promise.resolve();
  return cancellable(signal,(resolve,reject)=>{
   let doneSeek=false,doneFrame=false,callback=null,frameTimer=null,raf=null;
   const finish=()=>{if(doneSeek&&doneFrame)resolve();};
@@ -98,9 +100,9 @@ function seek(video,time,signal){
   const failed=()=>reject(Error('无法解码录屏'));
   const timeout=setTimeout(()=>reject(Error('读取画面超时')),10000);
   video.addEventListener('seeked',sought);video.addEventListener('error',failed);
-  const watch=()=>{callback=video.requestVideoFrameCallback((_,frame)=>{if(Math.abs(frame.mediaTime-time)<=.075){doneFrame=true;finish();}else watch();});};
+  const watch=()=>{callback=video.requestVideoFrameCallback((_,frame)=>{if(Math.abs(frame.mediaTime-targetTime)<=.075){doneFrame=true;finish();}else watch();});};
   if(video.requestVideoFrameCallback)watch();
-  try{video.currentTime=time;}catch(error){reject(error);}
+  try{video.currentTime=targetTime;}catch(error){reject(error);}
   return ()=>{clearTimeout(timeout);clearTimeout(frameTimer);if(raf!==null)cancelAnimationFrame(raf);if(callback!==null)video.cancelVideoFrameCallback?.(callback);video.removeEventListener('seeked',sought);video.removeEventListener('error',failed);};
  });
 }
@@ -115,6 +117,7 @@ async function decode(blob,signal){
 function guidance(error){
  const message=String(error?.message||'');
  if(message.includes('90 秒'))return '录屏超过 90 秒。请在相册裁剪成 90 秒以内，再返回选择。';
+ if(message.includes('片段过短'))return '截取片段过短，请调整起点和终点至少保留 0.5 秒以上。';
  if(message.includes('连续滚动'))return '没有识别到连续滚动。请检查蓝线之间是否包含滚动内容；也可以重新录屏，缓慢向同一方向滑动。';
  if(message.includes('超时'))return '读取画面超时。请保持页面在前台，再点“生成长截图”重试。';
  if(message.includes('内存')||message.includes('编码'))return '生成图片时遇到尺寸或内存限制。请把录屏裁成较短的片段后重试。';
@@ -143,13 +146,19 @@ function mount({cropEditor,onBusy,onResult}){
   try{
    media=openMedia(source,signal);await media.ready;checkAbort(signal);
    const video=media.video,{duration,width:W,height:H}=videoInfo(video);
+   await firstFrame(video,signal);checkAbort(signal);
+   const trim=cropEditor.trim?.()||{};
+   const clipStart=Math.max(0,Math.min(Number.isFinite(trim.startTime)?trim.startTime:0,duration));
+   const clipEnd=Math.max(clipStart,Math.min(Number.isFinite(trim.endTime)&&trim.endTime>0?trim.endTime:duration,duration));
+   if(clipEnd-clipStart<0.25)throw Error('截取片段过短');
+   const clipSpan=Math.max(0.01,clipEnd-clipStart);
    const y0=Math.round(H*top/100),crop=Math.round(H*(1-bottom/100))-y0,w=160,h=Math.round(crop*w/W),fw=480,fh=Math.round(crop*fw/W);
    small=document.createElement('canvas');fine=document.createElement('canvas');small.width=w;small.height=h;fine.width=fw;fine.height=fh;
    const sx=small.getContext('2d',{willReadFrequently:true}),fx=fine.getContext('2d',{willReadFrequently:true});if(!sx||!fx)throw Error('内存不足');
-   result=await ScrollshotCore.build({crop,w,h,fw,fh,percent,duration,
+   result=await ScrollshotCore.build({crop,w,h,fw,fh,percent,duration,startTime:clipStart,endTime:clipEnd,
     read:async time=>{await seek(video,time,signal);checkAbort(signal);const snapshot=document.createElement('canvas');snapshot.width=W;snapshot.height=crop;try{snapshot.getContext('2d').drawImage(video,0,y0,W,crop,0,0,W,crop);sx.drawImage(snapshot,0,0,w,h);fx.drawImage(snapshot,0,0,fw,fh);return{time,canvas:snapshot,coarse:sx.getImageData(0,0,w,h).data,fine:fx.getImageData(0,0,fw,fh).data,release(){snapshot.width=snapshot.height=0;}};}catch(error){snapshot.width=snapshot.height=0;throw error;}},
     encode:async(frame,y,height)=>{checkAbort(signal);const slice=document.createElement('canvas');slice.width=W;slice.height=height;try{slice.getContext('2d').drawImage(frame.canvas,0,y,W,height,0,0,W,height);return await encode(slice,signal);}finally{slice.width=slice.height=0;}},
-    onProgress:({time})=>{const ratio=Math.min(1,time/duration);report('正在识别画面',ratio*.85,ratio);}
+    onProgress:({time})=>{const ratio=Math.min(1,Math.max(0,(time-clipStart)/clipSpan));report('正在识别画面',ratio*.85,ratio);}
    });
    checkAbort(signal);report('正在生成图片',.85,0);
    const {parts,total,failed}=result,factor=Math.min(1,14500/total,Math.sqrt(12000000/(W*total)));
@@ -162,8 +171,9 @@ function mount({cropEditor,onBusy,onResult}){
     await new Promise(resolve=>setTimeout(resolve,0));checkAbort(signal);
    }
    const blob=await encode(out,signal,format==='png'?'image/png':'image/jpeg',.94);checkAbort(signal);
-   onResult(blob);success=true;
-   status.textContent=`生成完成：${out.width} × ${out.height} 像素，${(blob.size/1024/1024).toFixed(2)} MB。${factor<1?'图片较长，已自动缩小。':''}${failed?'部分画面没有足够重叠或存在动画，请检查有无遗漏。':''}`;
+   const rawCanvas=out;out=null;
+   onResult(blob,rawCanvas);success=true;
+   status.textContent=`生成完成：${rawCanvas.width} × ${rawCanvas.height} 像素，${(blob.size/1024/1024).toFixed(2)} MB。${factor<1?'图片较长，已自动缩小。':''}${failed?'部分画面没有足够重叠或存在动画，请检查有无遗漏。':''}`;
    report('正在生成图片',1,1);return true;
   }catch(error){status.textContent=signal.aborted?'已取消生成。录屏和设置已保留，可直接重新生成。':guidance(error);return false;}
   finally{

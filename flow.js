@@ -3,26 +3,33 @@
 function mount(options){
  const get=id=>document.getElementById(id),file=get('file'),go=get('go'),quick=get('quick-generate'),recordingStatus=get('recording-status'),retryRecording=get('retry-recording'),quickStatus=get('quick-status');
  const clearDialog=get('clear-dialog');
- const originalGenerate=go.onclick,recommended=['12','12','45','jpeg'].join('|'),key=()=>['top','bottom','seam','format'].map(id=>get(id).value).join('|');
+ const originalGenerate=go.onclick,recommended=['12','12','45','jpeg'].join('|'),key=()=>{const t=options.trim?.()||{};const trimPart=t.duration?`${Number(t.startTime||0).toFixed(2)}|${Number(t.endTime||t.duration).toFixed(2)}`:'full';return ['top','bottom','seam','format'].map(id=>get(id).value).join('|')+'|'+trimPart};
  let step=1,resultKey=null,resultFile=null,resultStatus=null,resultReturnStep=2,running=false,probe=null,validatedFile=null;
  const busy=()=>running||file.disabled;
  const ready=()=>!!validatedFile&&validatedFile===file.files[0];
  const cached=()=>ready()&&options.hasResult()&&resultFile===file.files[0]&&resultKey===key();
  function refresh(){
-  const locked=busy(),usable=ready(),reuse=cached(),defaults=key()===recommended;
+  const locked=busy(),usable=ready(),reuse=cached(),baseKey=['top','bottom','seam','format'].map(id=>get(id).value).join('|'),t=options.trim?.()||{},isFull=!t.duration||(t.startTime<=0.05&&t.endTime>=t.duration-0.05),defaults=baseKey===recommended&&isFull;
   get('quick-options').hidden=!usable;
   quick.disabled=go.disabled=locked||!usable;
   for(const id of ['adjust-crop','adjust-format'])get(id).disabled=locked||!usable;
-  get('adjust-format').textContent='图片格式 · '+(get('format').value==='png'?'PNG':'JPEG');
+  const fmtVal=get('format').value,fmtLabel=fmtVal==='png'?'PNG':'JPEG';
+  get('adjust-format').textContent='图片格式 · '+fmtLabel;
+  if(get('format-quick')){get('format-quick').value=fmtVal;get('format-quick').disabled=locked||!usable;}
+  get('format').disabled=locked||!usable;
   quick.textContent=reuse?'继续查看结果':defaults?'使用推荐设置生成':'使用当前设置生成';
-  get('quick-settings-summary').textContent=defaults?'推荐设置：默认画面范围，JPEG 格式。':'生成时将使用你调整后的画面范围和图片格式。';
+  const s=get('quick-settings-summary');
+  if(s){s.hidden=!usable;s.textContent=defaults?'推荐设置：默认画面范围（12%/12%），JPEG 格式。':'生成时将使用你调整后的画面范围、片段和图片格式。';}
+  const s2Fmt=get('s2-tab-format');
+  if(s2Fmt)s2Fmt.textContent='图片格式 · '+fmtLabel;
   document.querySelectorAll('[data-back]').forEach(b=>b.disabled=locked||step===1);
-  document.querySelectorAll('[data-clear]').forEach(b=>b.disabled=locked);
+  document.querySelectorAll('[data-clear]').forEach(b=>b.disabled=locked||(step===1&&!file.files.length&&!options.hasResult()));
   go.textContent=locked?'正在处理…':reuse?'继续查看结果':'生成长截图';
   get('flow-busy').hidden=!locked;get('panel-2').classList.toggle('is-generating',locked);
  }
  function show(value){
   step=value;options.onStepChange?.(step,running);
+  document.body?.classList?.toggle('is-substep',step>1);
   for(let i=1;i<=3;i++){get('panel-'+i).hidden=i!==step;const li=document.querySelector(`[data-step="${i}"]`);li.classList.toggle('active',i===step);li.classList.toggle('done',i<step);if(i===step)li.setAttribute('aria-current','step');else li.removeAttribute('aria-current');}
   get('step-announcement').textContent=`第 ${step} 步 / 共 3 步：${['选择录屏','设置与生成','编辑保存'][step-1]}`;
   if(step===3)get('result-summary').textContent=resultStatus??get('status').textContent;
@@ -62,12 +69,24 @@ function mount(options){
  });
  function openSettings(section){
   if(busy()||!ready())return;
-  get('capture-settings').open=section==='crop';show(2);
-  const target=section==='crop'?get('capture-settings').querySelector('summary'):get('format');
-  target.focus({preventScroll:true});target.scrollIntoView({block:'nearest'});
+  get('capture-settings').open=true;show(2);
+  const fineDrawer=get('s2-fine-drawer'),tabFine=get('s2-tab-fine');
+  if(fineDrawer){fineDrawer.hidden=true;tabFine?.setAttribute('aria-pressed','false');}
+  const target=section==='format'?get('format'):get('crop-frame');
+  target?.focus({preventScroll:true});
  }
  get('adjust-crop').addEventListener('click',()=>openSettings('crop'));
  get('adjust-format').addEventListener('click',()=>openSettings('format'));
+ get('format-quick')?.addEventListener('change',e=>{
+  const fmt=get('format');
+  if(fmt&&fmt.value!==e.target.value){fmt.value=e.target.value;fmt.dispatchEvent(new Event('change',{bubbles:true}));}
+ });
+ get('s2-tab-fine')?.addEventListener('click',()=>{
+  const fineDrawer=get('s2-fine-drawer'),tabFine=get('s2-tab-fine');
+  if(!fineDrawer)return;
+  const open=fineDrawer.hidden;fineDrawer.hidden=!open;
+  tabFine?.setAttribute('aria-pressed',String(open));
+ });
  document.querySelectorAll('[data-back]').forEach(b=>b.addEventListener('click',()=>{if(!busy()&&step>1)show(step===3?resultReturnStep:1);}));
  document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',clear));
  file.addEventListener('change',inspectSelection);

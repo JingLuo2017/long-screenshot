@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 require('../editor.js');require('../updates.js');
-const VERSION=ScrollshotUpdates.VERSION,NEXT='1.9.4',scope='https://example.test/long-screenshot/';
+const VERSION=ScrollshotUpdates.VERSION,NEXT='1.9.5',scope='https://example.test/long-screenshot/';
 const cacheName=ScrollshotUpdates.cacheName(scope);
 assert.equal(ScrollshotUpdates.compareVersions('1.10.0','1.9.9'),1);
 assert.equal(ScrollshotUpdates.compareVersions(VERSION,VERSION),0);
