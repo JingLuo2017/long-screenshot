@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+require('../extras.js');
+const uniform={width:3,height:3,data:new Uint8ClampedArray(36).fill(255)};
+ScrollshotExtras.blurPixels(uniform,3);
+assert(uniform.data.every(x=>x===255),'blur must preserve uniform opaque pixels including edges');
+const point={width:9,height:9,data:new Uint8ClampedArray(324)};
+for(let i=3;i<point.data.length;i+=4)point.data[i]=255;
+point.data[(4*9+4)*4]=255;
+ScrollshotExtras.blurPixels(point,2);
+assert(point.data[(4*9+4)*4]<255&&point.data[(4*9+3)*4]>0,'glass must spread local detail into neighboring pixels');
+for(let i=3;i<point.data.length;i+=4)assert.equal(point.data[i],255,'glass must preserve opacity');
+console.log('PASS glass blur preserves uniform colors, diffuses fine detail, and preserves alpha');

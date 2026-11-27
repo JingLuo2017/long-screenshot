@@ -6,5 +6,6 @@ ScrollshotExtras.drawPrivacy(mask,8,2,colors.map((color,i)=>({x:i/8,y:0,w:1/8,h:
 colors.forEach((color,i)=>assert.deepEqual([...mask.getImageData(i,0,1,1).data],[parseInt(color.slice(1,3),16),parseInt(color.slice(3,5),16),parseInt(color.slice(5,7),16),255]));
 const seen=[],stack=[],fake={globalAlpha:1,save(){stack.push({alpha:this.globalAlpha,fill:this.fillStyle})},restore(){const s=stack.pop();this.globalAlpha=s.alpha;this.fillStyle=s.fill},measureText(){return{width:20}},fillText(){seen.push({type:'watermark',font:this.font,alpha:this.globalAlpha,color:this.fillStyle})},fillRect(){seen.push({type:'mask',alpha:this.globalAlpha,color:this.fillStyle})}};
 ScrollshotExtras.composeEdits(fake,750,1000,{enabled:true,text:'日期',color:'#abcdef'},[{x:0,y:0,w:1,h:1,color:'#123456'}]);
-assert.deepEqual(seen.map(x=>x.type),['mask','watermark']);assert.equal(seen[0].color,'#123456');assert.equal(seen[0].alpha,1);assert.equal(seen[1].color,'#abcdef');assert(seen[1].font.includes('34px'));assert.equal(seen[1].alpha,.5);
+assert.deepEqual(seen.map(x=>x.type),['mask','watermark']);assert.equal(seen[0].color,'#123456');assert.equal(seen[0].alpha,1);assert.equal(seen[1].color,'#abcdef');assert(seen[1].font.includes('34px'));assert.equal(seen[1].alpha,.2);
 console.log('PASS exact mask RGB, fully opaque privacy, independent watermark color, default size/opacity and watermark over mask');
+

@@ -61,16 +61,27 @@ function harness(){
 }
 {
  const h=harness(),crop=h.ctx.ScrollshotCrop.mount();crop.setActive(true);h.video.onloadedmetadata();
- assert.equal(h.get('trim-set-start').disabled,true);h.complete();h.advance(32);assert.equal(h.get('trim-set-start').disabled,false);
- const input=t=>{h.get('crop-frame').value=String(t);h.get('crop-frame').dispatchEvent(new Event('input'));};
- input(2);input(8);h.get('crop-frame').dispatchEvent(new Event('change'));
- h.get('trim-set-start').dispatchEvent(new Event('click'));assert.equal(crop.trim().startTime,0,'pending slider digits must not be used to set a trim point');assert.match(h.get('crop-frame-time').textContent,/正在定位 8.0/);
- h.complete();h.advance(32);assert.equal(h.get('trim-set-start').disabled,true);
- h.complete();h.advance(32);assert.equal(h.get('trim-set-start').disabled,false);h.get('trim-set-start').dispatchEvent(new Event('click'));assert.equal(crop.trim().startTime,8);assert.match(h.get('crop-frame-time').textContent,/^8.0 \/ 20.0/);
- input(14);h.advance(5000);assert.match(h.get('crop-preview-status').textContent,/正在读取/);h.video.onloadedmetadata();assert.equal(crop.trim().startTime,8,'automatic preview recovery preserves trim settings');
- h.advance(5000);assert.equal(h.get('crop-preview-retry').hidden,false);assert.match(h.get('crop-preview-status').textContent,/重试预览/);
- h.get('crop-preview-retry').dispatchEvent(new Event('click'));h.video.onloadedmetadata();h.complete();h.advance(32);assert.equal(h.get('trim-set-start').disabled,false);assert.equal(crop.trim().startTime,8);
- input(10);crop.setActive(false);h.advance(6000);crop.setActive(true);h.video.onloadedmetadata();assert.equal(h.assignments.at(-1),10,'returning to settings preserves the last requested position');
- crop.reset();h.advance(6000);assert.equal(crop.trim().duration,0);assert.equal(h.get('trim-set-start').disabled,true);assert.equal(h.tasks.size,0);
+ assert.equal(h.get('crop-frame').disabled,false,'range selection is independent of pending decoding');
+ const input=(id,t)=>{h.get(id).value=String(t);h.get(id).dispatchEvent(new Event('input'));};
+ input('crop-frame',6.5);input('trim-end',18.2);
+ assert.equal(crop.trim().startTime,6.5);assert.equal(crop.trim().endTime,18.2);
+ assert.equal(h.get('trim-start-time').textContent,'00:06.5');assert.equal(h.get('trim-end-time').textContent,'00:18.2');
+ assert.match(h.get('trim-selected-duration').textContent,/11.7/);
+ input('crop-frame',19.8);assert.equal(crop.trim().startTime,17.7,'start cannot cross end');
+ input('trim-end',1);assert.equal(crop.trim().endTime,18.2,'end cannot cross start');
+ h.get('trim-reset').dispatchEvent(new Event('click'));
+ assert.equal(crop.trim().startTime,0);assert.equal(crop.trim().endTime,20);
+ input('crop-frame',2);input('crop-frame',8);input('trim-end',14);
+ h.complete();h.advance(32);h.complete();h.advance(32);
+ assert.equal(h.video.currentTime,14,'decoder settles on the last edited endpoint');
+ assert.equal(crop.trim().startTime,8);assert.equal(crop.trim().endTime,14);
+ input('trim-end',16);h.advance(5000);h.video.onloadedmetadata();
+ assert.equal(crop.trim().startTime,8,'preview recovery preserves both endpoints');assert.equal(crop.trim().endTime,16);
+ h.advance(5000);assert.equal(h.get('crop-preview-retry').hidden,false);
+ h.get('crop-preview-retry').dispatchEvent(new Event('click'));h.video.onloadedmetadata();h.complete();h.advance(32);
+ assert.equal(crop.trim().endTime,16);
+ crop.setActive(false);h.advance(6000);crop.setActive(true);h.video.onloadedmetadata();
+ assert.equal(h.assignments.at(-1),16,'returning preserves the last endpoint preview');
+ crop.reset();h.advance(6000);assert.equal(crop.trim().duration,0);assert.equal(h.get('crop-frame').disabled,true);assert.equal(h.tasks.size,0);
 }
-console.log('PASS seek coalescing, missing events, decoded-frame confirmation, timeout/retry, background/resume, trimming guards and stale-source cleanup');
+console.log('PASS seek queue, decoded frames, timeout/retry, background/resume, dual-range crossing guards, reset and stale-source cleanup');

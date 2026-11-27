@@ -75,22 +75,31 @@ function createFrameSeeker(video,onState){
 }
 function mount(){
 const get=id=>document.getElementById(id),file=get('file'),stage=get('crop-stage'),video=get('crop-video'),preview=get('crop-preview'),seek=get('crop-frame'),notice=get('crop-preview-status'),fine=get('crop-precision'),rangeText=get('crop-retained'),frameText=get('crop-frame-time');
-const trimStartBtn=get('trim-set-start'),trimEndBtn=get('trim-set-end'),trimResetBtn=get('trim-reset'),trimSummary=get('trim-summary');
+const trimEndInput=get('trim-end'),trimResetBtn=get('trim-reset'),trimSummary=get('trim-summary');
 const input=Object.fromEntries(Object.keys(DEFAULTS).map(id=>[id,get(id)]));
 const handles={top:get('crop-top-handle'),bottom:get('crop-bottom-handle')};
 const retry=get('crop-preview-retry');
 let active=false,suspended=false,clip=null,url=null,position=null,drag=null,duration=0,trimStart=0,trimEnd=0,trimNote='',seeker=null,recoveryCount=0,recoveryTimer=0;
-function lockTrim(locked){if(trimStartBtn)trimStartBtn.disabled=locked;if(trimEndBtn)trimEndBtn.disabled=locked;preview.setAttribute('aria-busy',String(locked));}
+function lockTrim(locked){preview.setAttribute('aria-busy',String(locked));const unavailable=!duration||!url||suspended;seek.disabled=trimEndInput.disabled=unavailable;}
 lockTrim(true);
 const values=()=>Object.fromEntries(Object.entries(input).map(([id,el])=>[id,el.valueAsNumber]));
 const readable=value=>Number(value.toFixed(1));
 function paintTrim(){
  if(!trimSummary)return;
- if(!duration){trimSummary.textContent='';return;}
+ if(!duration){get('trim-selected-range').textContent=get('trim-selected-duration').textContent='';seek.disabled=trimEndInput.disabled=true;return;}
  const s=clamp(trimStart,0,duration),e=clamp(trimEnd||duration,s,duration),span=Math.max(0,e-s);
  const isFull=s<=0.05&&e>=duration-0.05;
- const baseText=isFull?`保留全部时长（${duration.toFixed(1)} 秒）`:`已截取片段：${s.toFixed(1)}s – ${e.toFixed(1)}s（共 ${span.toFixed(1)} 秒）`;
- trimSummary.textContent=trimNote?`${baseText} · ${trimNote}`:baseText;
+ const time=value=>{const tenths=Math.round(value*10);return `${String(Math.floor(tenths/600)).padStart(2,'0')}:${String(Math.floor(tenths/10)%60).padStart(2,'0')}.${tenths%10}`;};
+ get('trim-start-time').textContent=time(s);get('trim-end-time').textContent=time(e);
+ get('trim-selected-range').textContent=`已选 ${time(s)}–${time(e)}`;
+ get('trim-selected-duration').textContent=`· 共 ${span.toFixed(1)} 秒`;
+ for(const el of [seek,trimEndInput]){el.max=String(duration);el.disabled=!url||suspended;}
+ seek.value=String(s);trimEndInput.value=String(e);
+ seek.setAttribute('aria-valuetext',`起点 ${time(s)}`);trimEndInput.setAttribute('aria-valuetext',`终点 ${time(e)}`);
+ const gap=Math.min(.5,duration*.5);
+ seek.setAttribute('aria-valuemax',String(Math.max(0,e-gap)));trimEndInput.setAttribute('aria-valuemin',String(s+gap));
+ get('trim-selection').style.left=`calc(8px + (100% - 16px) * ${s/duration})`;
+ get('trim-selection').style.right=`calc(8px + (100% - 16px) * ${1-e/duration})`;
  if(trimResetBtn)trimResetBtn.disabled=isFull;
 }
 function notifyTrim(){
@@ -129,33 +138,20 @@ for(const [id,handle] of Object.entries(handles)){
 function syncFields(){for(const el of Object.values(input))el.removeAttribute('aria-invalid');paint()}
 for(const el of Object.values(input))el.addEventListener('input',syncFields);
 get('crop-defaults').addEventListener('click',()=>{for(const [id,value] of Object.entries(DEFAULTS)){input[id].value=value;input[id].dispatchEvent(new Event('change',{bubbles:true}));}syncFields()});
-trimStartBtn?.addEventListener('click',()=>{
- const confirmed=seeker?.current();if(!duration||confirmed==null)return;
- const minSpan=Math.min(0.5,duration*0.5),current=clamp(confirmed,0,duration);
- trimNote='';
- if(current<=(trimEnd||duration)-minSpan){
-  trimStart=current;
- }else if(duration-current>=minSpan){
-  trimStart=current;trimEnd=duration;trimNote='起点晚于原终点，已重置终点至结尾';
- }else{
-  trimStart=Math.max(0,duration-minSpan);trimEnd=duration;trimNote=`至少保留 ${minSpan.toFixed(1)} 秒`;
- }
- notifyTrim();
-});
-trimEndBtn?.addEventListener('click',()=>{
- const confirmed=seeker?.current();if(!duration||confirmed==null)return;
- const minSpan=Math.min(0.5,duration*0.5),current=clamp(confirmed,0,duration);
- trimNote='';
- if(current>=trimStart+minSpan){
-  trimEnd=current;
- }else if(current>=minSpan){
-  trimStart=0;trimEnd=current;trimNote='终点早于原起点，已重置起点为 0.0s';
- }else{
-  trimStart=0;trimEnd=Math.min(duration,minSpan);trimNote=`至少保留 ${minSpan.toFixed(1)} 秒`;
- }
- notifyTrim();
-});
-trimResetBtn?.addEventListener('click',()=>{if(!duration)return;trimStart=0;trimEnd=duration;trimNote='';notifyTrim();});
+function changeTrim(side){
+ if(!duration||!url||suspended)return;
+ const gap=Math.min(.5,duration*.5);
+ if(side==='start')trimStart=clamp(Number(seek.value),0,(trimEnd||duration)-gap);
+ else trimEnd=clamp(Number(trimEndInput.value),trimStart+gap,duration);
+ trimNote='';notifyTrim();
+ const target=side==='start'?trimStart:trimEnd;
+ position=clamp(target,0,Math.max(0,duration-.001));seeker?.request(position);
+}
+for(const event of ['input','change']){
+ seek.addEventListener(event,()=>changeTrim('start'));
+ trimEndInput.addEventListener(event,()=>changeTrim('end'));
+}
+trimResetBtn?.addEventListener('click',()=>{if(!duration)return;trimStart=0;trimEnd=duration;trimNote='';notifyTrim();position=0;seeker?.request(0);});
 function detach(keep=true){
  drag=null;if(recoveryTimer)clearTimeout(recoveryTimer);recoveryTimer=0;
  if(keep&&url)position=seeker?.target()??position;
@@ -177,7 +173,7 @@ function attach(){
   const nextDur=video.duration;
   if(!duration||Math.abs(duration-nextDur)>0.05){duration=nextDur;trimStart=0;trimEnd=nextDur;trimNote='';}
   stage.style.setProperty('--crop-ratio',String(video.videoWidth/video.videoHeight));
-  seek.max=Math.max(0,nextDur-.02);seek.value=clamp(position??Math.min(.7,nextDur*.2),0,Number(seek.max));
+  seek.max=trimEndInput.max=String(nextDur);
   seeker?.dispose();
   seeker=createFrameSeeker(video,state=>{
    if(url!==expected)return;
@@ -194,12 +190,11 @@ function attach(){
    }
   });
   preview.hidden=false;notice.hidden=true;paint();requestAnimationFrame(fitStage);
-  seeker.request(Number(seek.value));
+  seeker.request(clamp(position??trimStart,0,Math.max(0,nextDur-.001)));
  };
  video.onerror=()=>{if(url!==expected)return;seeker?.dispose();seeker=null;lockTrim(true);preview.hidden=true;notice.hidden=false;notice.textContent='无法读取录屏预览。请确认视频能在相册播放，或换一段录屏。';if(retry)retry.hidden=false;};
  video.src=expected;
 }
-for(const event of ['input','change'])seek.addEventListener(event,()=>{if(!url||video.readyState<1||!seeker)return;seeker.request(Number(seek.value));});
 retry?.addEventListener('click',()=>{recoveryCount=0;detach();attach();});
 file.addEventListener('change',attach);get('capture-settings').addEventListener('toggle',attach);
 paint();

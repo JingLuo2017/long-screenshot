@@ -198,3 +198,42 @@ body.is-substep .compact-topbar{display:none}
   .bottom-dock,.is-editing #watermark-editor{padding:7px 9px 8px;gap:6px}
   .fine-grid{gap:6px}
 }
+
+/* v1.9.6: preserve the v1.9.5 workbench; add only local controls. */
+.app-credit{display:grid;gap:3px;text-align:center;font-size:11px;line-height:1.5;color:var(--muted)}
+#flow-busy .app-credit{margin-top:10px}
+.trim-heading{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:5px;margin:4px 0 0}
+.trim-endpoint{display:flex;align-items:center;gap:4px;margin:0;font-size:12px;white-space:nowrap}
+.trim-endpoint output{color:var(--brand);font-variant-numeric:tabular-nums}
+#trim-summary{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;column-gap:4px;min-width:0;margin:0;font-size:11px;text-align:center;color:var(--muted);font-variant-numeric:tabular-nums}
+#trim-summary span{white-space:nowrap}
+.trim-range-row{display:flex;align-items:center;gap:8px}
+.trim-range{position:relative;flex:1;min-width:0;height:44px}
+.trim-track,.trim-selection{position:absolute;left:8px;right:8px;top:20px;height:4px;border-radius:99px;pointer-events:none;background:#dbe4f4}
+.trim-selection{background:var(--brand)}
+.trim-range input[type=range]{position:absolute;inset:0;width:100%;min-width:0;height:44px;margin:0;background:transparent;appearance:none;-webkit-appearance:none;pointer-events:none;touch-action:none}
+.trim-range input[type=range]::-webkit-slider-runnable-track{height:4px;background:transparent}
+.trim-range input[type=range]::-moz-range-track{height:4px;background:transparent}
+.trim-range input[type=range]::-moz-range-progress{background:transparent}
+.trim-range input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border:0;border-radius:50%;background:var(--brand);pointer-events:auto;box-shadow:none}
+.trim-range input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:var(--brand);pointer-events:auto;box-shadow:none}
+.trim-range input:disabled::-webkit-slider-thumb{pointer-events:none;background:#94a0ae}
+.trim-range input:disabled::-moz-range-thumb{pointer-events:none;background:#94a0ae}
+.trim-range input:focus-visible{outline:2px solid #99b8f0;outline-offset:-2px;border-radius:8px}
+#trim-end{z-index:2}
+#trim-reset{flex:none;width:auto;min-height:38px;padding:6px 10px;font-size:12px}
+.mask-mosaic-styles{display:flex;align-items:center;gap:4px;flex:none}
+.mask-effect-button{width:36px;height:38px;min-height:38px;display:grid;place-items:center;padding:0;border:1px solid #d3def0;border-radius:8px;background:#fff;color:#546379;touch-action:manipulation;cursor:pointer}
+.mask-effect-button[aria-pressed=true]{background:#2255c7;border-color:#2255c7;color:white}
+.mask-effect-button:disabled{opacity:.5;cursor:not-allowed}
+.mask-effect-button:focus-visible{outline:3px solid #99b8f0;outline-offset:2px}
+.pixel-style-icon{width:17px;height:17px;background:repeating-linear-gradient(90deg,transparent 0 4px,currentColor 4px 6px,transparent 6px 7px),repeating-linear-gradient(0deg,transparent 0 4px,currentColor 4px 6px,transparent 6px 7px);border:1px solid currentColor;border-radius:2px}
+.glass-style-icon{font-size:25px;line-height:1;font-family:Arial,sans-serif;transform:translateY(-1px)}
+.mask-compact-bar{gap:5px}
+.mask-compact-bar .mask-style-switch .button{padding:6px 9px}
+.mask-mosaic-tip{flex:1;min-width:0}
+#privacy-clear{padding:6px 8px}
+.privacy-rect.is-mosaic:not(.is-synced){backdrop-filter:none;-webkit-backdrop-filter:none;background-image:none;background:transparent!important}
+.mask-effect-preview{position:absolute;inset:0;display:block;width:100%;height:100%;pointer-events:none}
+@media(max-width:420px){.trim-endpoint{flex-direction:column;gap:0}.mask-mosaic-tip{display:none}.mask-effect-button{width:40px;height:40px}}
+@media(pointer:coarse){.mask-effect-button{width:44px;height:44px}.mask-compact-bar .mask-style-switch .button,#privacy-clear{min-height:44px!important}.trim-range input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8px}.trim-range input[type=range]::-moz-range-thumb{width:20px;height:20px}}
